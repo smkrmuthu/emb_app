@@ -8,6 +8,7 @@ import {
   scanSampleBill,
   getBestMatchingSample
 } from './services/ocrService';
+import { processPDFFile } from './services/pdfService';
 import { Header, AppViewMode } from './components/Layout/Header';
 import { Navigation, AppTab } from './components/Layout/Navigation';
 import { ViewportFrame } from './components/Layout/ViewportFrame';
@@ -56,8 +57,9 @@ export const App: React.FC = () => {
 
   const runRealScan = useCallback(async (
     fileName: string,
-    fileUrl: string,           // data URL of the image
-    hintedType: BillType | null
+    fileUrl?: string,           // data URL of the image or PDF page
+    hintedType: BillType | null = null,
+    pdfText?: string
   ) => {
     setIsScanning(true);
     setCurrentTab('breakdown');
@@ -66,7 +68,7 @@ export const App: React.FC = () => {
 
     const result = await scanRealBill(fileUrl, fileName, hintedType, (prog) => {
       setScanProgress(prog);
-    });
+    }, pdfText);
 
     if (result.needsBillTypePicker) {
       // OCR done but type unknown — show picker modal
@@ -97,6 +99,7 @@ export const App: React.FC = () => {
   const handleUploadBill = useCallback((
     fileName: string,
     fileUrl?: string,
+    pdfText?: string,
     sampleId?: string
   ) => {
     // Sample chip clicked
@@ -105,21 +108,22 @@ export const App: React.FC = () => {
       return;
     }
 
-    // Real file uploaded — if there's any ambiguity in filename detection, ASK THE USER!
-    const detected = detectBillTypeFromFilename(fileName);
+    // Detect type from filename or pdfText
+    const detected = detectBillTypeFromFilename(fileName)
+      ?? (pdfText ? (pdfText.match(/tangedco|electricity|current\s*consumption/i) ? 'electricity' : null) : null);
 
-    if (fileUrl) {
+    if (fileUrl || pdfText) {
       if (detected) {
-        // High-confidence filename match → scan directly
-        runRealScan(fileName, fileUrl, detected);
+        // High-confidence type match → scan/parse directly
+        runRealScan(fileName, fileUrl, detected, pdfText);
       } else {
-        // Doubtful / generic filename (e.g. photo.jpg, scan.png) → ASK THE USER TO SELECT TYPE
+        // Doubtful / generic filename → ASK THE USER TO SELECT TYPE
         setPendingUpload({ fileName, fileUrl });
       }
       return;
     }
 
-    // PDF or non-image file → ASK USER TO SELECT TYPE
+    // PDF or non-image file without text → ASK USER TO SELECT TYPE
     setPendingUpload({ fileName, fileUrl: undefined });
   }, [runRealScan, runSampleScan]);
 
@@ -175,18 +179,24 @@ export const App: React.FC = () => {
     });
   }, [uploadedFileName, uploadedFileUrl, activeBill.billerName]);
 
-  const handleGlobalFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleGlobalFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
       const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        const dataUrl = file.type.startsWith('image/') ? (evt.target?.result as string) : undefined;
-        handleUploadBill(file.name, dataUrl);
-      };
-      if (file.type.startsWith('image/')) {
-        reader.readAsDataURL(file);
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        try {
+          const pdfRes = await processPDFFile(file);
+          handleUploadBill(file.name, pdfRes.pageImage || undefined, pdfRes.text);
+        } catch (err) {
+          console.warn('PDF processing failed in global input:', err);
+          handleUploadBill(file.name, undefined);
+        }
       } else {
-        handleUploadBill(file.name, undefined);
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          const dataUrl = evt.target?.result as string;
+          handleUploadBill(file.name, dataUrl);
+        };
+        reader.readAsDataURL(file);
       }
     }
   }, [handleUploadBill]);

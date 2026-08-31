@@ -69,28 +69,33 @@ export interface ScanResult {
  * Runs actual Tesseract.js OCR and parses the result.
  */
 export async function scanRealBill(
-  imageDataUrl: string,
+  imageDataUrl: string | undefined,
   fileName: string,
   hintedType: BillType | null,
-  onProgress: (p: ScanProgressCallback) => void
+  onProgress: (p: ScanProgressCallback) => void,
+  pdfText?: string
 ): Promise<ScanResult> {
 
-  // Step 1 — OCR
-  onProgress({ stepIndex: 1, totalSteps: 4, statusText: 'Scanning bill with OCR engine…', subText: `Reading "${fileName}"` });
+  let ocrText = pdfText || '';
 
-  let ocrText = '';
-
-  try {
-    const ocr = await extractTextFromImage(imageDataUrl, (status, pct) => {
-      onProgress({
-        stepIndex: 1, totalSteps: 4,
-        statusText: status,
-        subText: `OCR progress: ${pct}%`
+  // Step 1 — OCR (only if pdfText not already extracted)
+  if (!ocrText && imageDataUrl) {
+    onProgress({ stepIndex: 1, totalSteps: 4, statusText: 'Scanning bill with OCR engine…', subText: `Reading "${fileName}"` });
+    try {
+      const ocr = await extractTextFromImage(imageDataUrl, (status, pct) => {
+        onProgress({
+          stepIndex: 1, totalSteps: 4,
+          statusText: status,
+          subText: `OCR progress: ${pct}%`
+        });
       });
-    });
-    ocrText = ocr.text;
-  } catch (err) {
-    console.warn('OCR failed, using filename detection:', err);
+      ocrText = ocr.text;
+    } catch (err) {
+      console.warn('OCR failed, using filename detection:', err);
+    }
+  } else if (pdfText) {
+    onProgress({ stepIndex: 1, totalSteps: 4, statusText: 'Extracting text from PDF invoice…', subText: `Reading "${fileName}"` });
+    await delay(300);
   }
 
   // Step 2 — Detect type

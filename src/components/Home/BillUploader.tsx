@@ -1,25 +1,33 @@
 import React, { useRef, useState } from 'react';
 import { Camera, FileUp, Plus } from 'lucide-react';
+import { processPDFFile } from '../../services/pdfService';
 
 interface BillUploaderProps {
-  onFileSelected: (fileName: string, fileUrl?: string, billId?: string) => void;
+  onFileSelected: (fileName: string, fileUrl?: string, pdfText?: string, billId?: string) => void;
 }
 
 export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const readAndEmit = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = file.type.startsWith('image/') ? (e.target?.result as string) : undefined;
-      onFileSelected(file.name, dataUrl);
-    };
-    if (file.type.startsWith('image/')) {
-      reader.readAsDataURL(file);
+  const readAndEmit = async (file: File) => {
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      try {
+        // Process PDF client-side: extract vector text + render Page 1 image
+        const pdfRes = await processPDFFile(file);
+        onFileSelected(file.name, pdfRes.pageImage || undefined, pdfRes.text);
+      } catch (err) {
+        console.warn('PDF processing failed, falling back to standard reader:', err);
+        onFileSelected(file.name, undefined, undefined);
+      }
     } else {
-      // For PDFs: emit without preview URL
-      onFileSelected(file.name, undefined);
+      // Standard image file (JPEG, PNG, WEBP)
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        onFileSelected(file.name, dataUrl);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
