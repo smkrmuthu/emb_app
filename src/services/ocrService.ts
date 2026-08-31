@@ -42,7 +42,7 @@ export function detectBillTypeFromFilename(fileName: string): BillType | null {
  */
 function detectBillTypeFromText(text: string): BillType | null {
   const t = text.toLowerCase();
-  if (/tangedco|tnpdcl|kseb|tsspdcl|bescom|electricity\s*bill|units\s*consumed|kwh|tariff\s*slab/.test(t)) return 'electricity';
+  if (/tangedco|tnpdcl|kseb|tsspdcl|bescom|electricity|units\s*consumed|kwh|tariff\s*slab|current\s*consumption|tax\s*invoice|service\s*connection|minnagam|tnebenet/.test(t)) return 'electricity';
   if (/cgst|sgst|restaurant|cafe|dining|food\s*bill|take\s*away|takeaway|menu|dosa|biryani|thali/.test(t)) return 'restaurant';
   if (/credit\s*card|statement|minimum.*due|total.*due|credit\s*limit|outstanding\s*balance/.test(t)) return 'credit_card';
   if (/grocery|supermarket|dmart|bigbasket|mrt|mrp|net.*amount.*items/.test(t)) return 'grocery';

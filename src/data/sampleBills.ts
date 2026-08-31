@@ -128,6 +128,68 @@ export const SAMPLE_BILLS: BillData[] = [
   },
 
   {
+    id: 'dinesh-tangedco-invoice',
+    type: 'electricity',
+    state: 'tamil_nadu',
+    billerName: 'TNPDCL — TANGEDCO (DINESH.R)',
+    categoryLabel: 'Electricity Bill',
+    billNumber: 'Conn: 09-315-363-699',
+    billingCycle: 'June 2026',
+    billDate: '23 Jun 2026',
+    dueDate: '13/07/2026',
+    totalAmount: 1314,
+    summaryPlain: 'TANGEDCO Tax Invoice for DINESH.R (SITHALAPAKKAM). 910 units consumed. High slab warning: 410 units over the 500 threshold. Energy charges ₹4,691.50 less Govt Subsidy -₹1,824.75 and Adjustments -₹1,553.00 = Net Payable ₹1,314.00.',
+    ebDetails: {
+      state: 'tamil_nadu',
+      discomName: 'TNPDCL — TANGEDCO (SITHALAPAKKAM)',
+      meterNumber: '1026753',
+      consumedUnits: 910,
+      fixedCharges: 0,
+      electricityDuty: 0,
+      fuelSurcharge: 0,
+      slabBreakdown: [
+        { slabRange: '0–100 units (Govt Subsidy)', unitsCharged: 100, ratePerUnit: 0, totalCost: 0, isFree: true, colorHex: '#2E6E4E' },
+        { slabRange: '101–200 units @ ₹2.35', unitsCharged: 100, ratePerUnit: 2.35, totalCost: 235, isFree: false, colorHex: '#429367' },
+        { slabRange: '201–400 units @ ₹4.95', unitsCharged: 200, ratePerUnit: 4.95, totalCost: 990, isFree: false, colorHex: '#A9812E' },
+        { slabRange: '401–500 units @ ₹6.80', unitsCharged: 100, ratePerUnit: 6.80, totalCost: 680, isFree: false, colorHex: '#D97706' },
+        { slabRange: '501–910 units @ ₹8.40 (410 excess units)', unitsCharged: 410, ratePerUnit: 8.40, totalCost: 3444, isFree: false, colorHex: '#DC2626' }
+      ],
+      nextSlabThreshold: {
+        limit: 500,
+        excessUnits: 410,
+        excessCost: 3444,
+        potentialSavings: 3444,
+        tip: 'Staying under 500 units next cycle keeps you out of the top ₹8.40 slab — saves ~₹3,444.'
+      }
+    },
+    lineItems: [
+      { id: '1', label: 'Energy Charges (910.0 units consumed)', amount: 4691.50 },
+      { id: '2', label: 'Govt Subsidy Exemption', amount: -1824.75 },
+      { id: '3', label: 'Prior Adjustments / SD', amount: -1553.00 },
+      { id: '4', label: 'Round off', amount: 0.25, isSubItem: true },
+      { id: '5', label: 'Net Amount Payable', amount: 1314 }
+    ],
+    flags: [
+      {
+        id: 'flag-high-slab',
+        severity: 'danger',
+        title: '⚠ High Slab Warning — 410 Units Over 500 Threshold',
+        description: 'You consumed 910 units. The 410 units above 500 are billed at the maximum ₹8.40/unit tier. Reducing usage below 500 units saves ~₹3,444 per cycle.',
+        savingsPotential: 3444,
+        actionable: true,
+        actionText: 'View Energy Saving Blueprint',
+        lawCitation: 'TNERC Domestic Tariff Order 2024-2026'
+      },
+      {
+        id: 'flag-govt-subsidy',
+        severity: 'info',
+        title: '✓ TN Govt Subsidy (-₹1,824.75) Applied',
+        description: 'First 100 units provided at ₹0 cost + tariff subsidies as mandated by the Tamil Nadu State Electricity Subsidy scheme.',
+        lawCitation: 'TN Govt Energy Dept G.O. Ms. No. 34'
+      }
+    ]
+  },
+  {
     id: 'tn-eb-612',
     type: 'electricity',
     state: 'tamil_nadu',
