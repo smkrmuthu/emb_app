@@ -1,22 +1,28 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { BillData, BillFlag, DisputeType } from '../../types/bill';
 import { EBVisualizer } from './EBVisualizer';
-import { Volume2, FileText, CheckCircle2, AlertTriangle, AlertOctagon, Info, Share2, Percent } from 'lucide-react';
+import { Volume2, FileText, CheckCircle2, AlertTriangle, AlertOctagon, Info, Share2, Percent, Camera, Tag } from 'lucide-react';
 
 interface BillBreakdownViewProps {
   bill: BillData;
   onOpenDispute: (type: DisputeType, bill: BillData) => void;
   onOpenEMI: () => void;
   onOpenShare: (bill: BillData) => void;
+  onRetakePhoto?: () => void;
+  onChangeBillType?: () => void;
 }
 
 export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
   bill,
   onOpenDispute,
   onOpenEMI,
-  onOpenShare
+  onOpenShare,
+  onRetakePhoto,
+  onChangeBillType
 }) => {
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isSpeaking, setIsSpeaking] = React.useState(false);
+
+  const isLowQuality = bill.flags.some(f => f.id === 'ocr-low-quality') || (bill.totalAmount === 0 && bill.lineItems.length <= 1);
 
   const handleSpeak = () => {
     if (!('speechSynthesis' in window)) {
@@ -57,16 +63,70 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
           <div className="app-title" style={{ fontSize: '16px' }}>{bill.billerName}</div>
           <div className="app-subtitle">{bill.billingCycle} · {bill.categoryLabel}</div>
         </div>
+        <div style={{ display: 'flex', gap: '4px' }}>
+          <button
+            onClick={handleSpeak}
+            className="btn-outline"
+            style={{ padding: '4px 8px', fontSize: '10px', borderRadius: '12px' }}
+            title="Read summary aloud"
+          >
+            <Volume2 size={12} />
+            <span>{isSpeaking ? 'Stop' : 'Listen'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Top Quick Actions Bar (Re-take / Change Type) */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
         <button
-          onClick={handleSpeak}
+          onClick={onRetakePhoto}
           className="btn-outline"
-          style={{ padding: '4px 8px', fontSize: '10px', borderRadius: '12px' }}
-          title="Read summary aloud in plain language"
+          style={{ flex: 1, padding: '5px 8px', fontSize: '10px', borderRadius: '8px', justifyContent: 'center' }}
         >
-          <Volume2 size={12} />
-          <span>{isSpeaking ? 'Stop' : 'Listen'}</span>
+          <Camera size={12} />
+          <span>Re-take / Upload Photo</span>
+        </button>
+
+        <button
+          onClick={onChangeBillType}
+          className="btn-outline"
+          style={{ flex: 1, padding: '5px 8px', fontSize: '10px', borderRadius: '8px', justifyContent: 'center' }}
+        >
+          <Tag size={12} />
+          <span>Change Bill Type</span>
         </button>
       </div>
+
+      {/* Unreadable / Low Quality Alert Callout */}
+      {isLowQuality && (
+        <div className="callout-box warning" style={{ marginBottom: '12px', borderLeftWidth: '4px' }}>
+          <div className="callout-head">
+            <AlertTriangle size={15} style={{ color: 'var(--warning)' }} />
+            <span style={{ fontWeight: 700 }}>Could Not Read Photo Clearly</span>
+          </div>
+          <div className="callout-body" style={{ marginTop: '4px' }}>
+            The uploaded image was blurry, dark, or hard to read. Please re-take a clear photo in good light or select the correct bill type manually.
+          </div>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+            <button
+              className="btn-gold"
+              style={{ padding: '6px 12px', fontSize: '10.5px' }}
+              onClick={onRetakePhoto}
+            >
+              <Camera size={12} />
+              <span>📷 Re-take / Upload Clear Photo</span>
+            </button>
+            <button
+              className="btn-outline"
+              style={{ padding: '6px 10px', fontSize: '10.5px' }}
+              onClick={onChangeBillType}
+            >
+              <Tag size={12} />
+              <span>Select Bill Type</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Bill Total Hero */}
       <div className="bill-hero-card">

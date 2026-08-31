@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { BillData, BillType, DisputeType, Language } from './types/bill';
 import { SAMPLE_BILLS } from './data/sampleBills';
 import {
@@ -33,11 +33,14 @@ export const App: React.FC = () => {
     subText: 'Please wait'
   });
 
+  // Global File Input Ref for Re-taking photos / uploads anywhere
+  const globalFileInputRef = useRef<HTMLInputElement>(null);
+
   // Uploaded file state (image data URL + name)
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string | undefined>();
   const [uploadedFileName, setUploadedFileName] = useState<string | undefined>();
 
-  // Bill type picker — shown when auto-detection fails
+  // Bill type picker — shown when user selects or when auto-detection is doubtful
   const [pendingUpload, setPendingUpload] = useState<{
     fileName: string;
     fileUrl?: string;
@@ -66,9 +69,8 @@ export const App: React.FC = () => {
     });
 
     if (result.needsBillTypePicker) {
-      // OCR done but type unknown — show picker, stay on home
+      // OCR done but type unknown — show picker modal
       setIsScanning(false);
-      setCurrentTab('home');
       setPendingUpload({ fileName, fileUrl });
       return;
     }
@@ -103,36 +105,46 @@ export const App: React.FC = () => {
       return;
     }
 
-    // Real file uploaded — must have a data URL (image)
+    // Real file uploaded — if there's any ambiguity in filename detection, ASK THE USER!
+    const detected = detectBillTypeFromFilename(fileName);
+
     if (fileUrl) {
-      const detected = detectBillTypeFromFilename(fileName);
-      runRealScan(fileName, fileUrl, detected);
+      if (detected) {
+        // High-confidence filename match → scan directly
+        runRealScan(fileName, fileUrl, detected);
+      } else {
+        // Doubtful / generic filename (e.g. photo.jpg, scan.png) → ASK THE USER TO SELECT TYPE
+        setPendingUpload({ fileName, fileUrl });
+      }
       return;
     }
 
-    // PDF or non-image file — can't OCR in browser without a server
-    // Show type picker then use best sample for that type
+    // PDF or non-image file → ASK USER TO SELECT TYPE
     setPendingUpload({ fileName, fileUrl: undefined });
   }, [runRealScan, runSampleScan]);
 
   // ── Type picker handler ───────────────────────────────────────────────────
 
   const handleBillTypePicked = useCallback((type: BillType) => {
-    if (!pendingUpload) return;
+    if (!pendingUpload) {
+      // If user opened picker directly from Breakdown view to change active bill type:
+      setActiveBill(getBestMatchingSample(type));
+      return;
+    }
+
     const { fileName, fileUrl } = pendingUpload;
     setPendingUpload(null);
 
     if (fileUrl) {
-      // We have the image — now run real OCR with the user-confirmed type
+      // We have the image — run real OCR with user-selected type
       runRealScan(fileName, fileUrl, type);
     } else {
-      // PDF or non-image: fall back to best sample for this type
+      // PDF or non-image: show animated scan & best sample for selected type
       setIsScanning(true);
       setCurrentTab('breakdown');
       setUploadedFileName(fileName);
       setUploadedFileUrl(undefined);
 
-      // Animate through steps then show best sample
       const steps: ScanProgressCallback[] = [
         { stepIndex: 1, totalSteps: 4, statusText: 'Reading bill format…', subText: `"${fileName}"` },
         { stepIndex: 2, totalSteps: 4, statusText: 'Applying compliance rules…', subText: `${type} bill — matching GST & statutory schedules` },
@@ -150,6 +162,35 @@ export const App: React.FC = () => {
     }
   }, [pendingUpload, runRealScan]);
 
+  // ── Re-take photo / Upload Trigger ───────────────────────────────────────
+
+  const triggerRetakePhoto = useCallback(() => {
+    globalFileInputRef.current?.click();
+  }, []);
+
+  const handleChangeBillType = useCallback(() => {
+    setPendingUpload({
+      fileName: uploadedFileName || activeBill.billerName,
+      fileUrl: uploadedFileUrl
+    });
+  }, [uploadedFileName, uploadedFileUrl, activeBill.billerName]);
+
+  const handleGlobalFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const dataUrl = file.type.startsWith('image/') ? (evt.target?.result as string) : undefined;
+        handleUploadBill(file.name, dataUrl);
+      };
+      if (file.type.startsWith('image/')) {
+        reader.readAsDataURL(file);
+      } else {
+        handleUploadBill(file.name, undefined);
+      }
+    }
+  }, [handleUploadBill]);
+
   const handleSelectBill = useCallback((bill: BillData) => {
     setActiveBill(bill);
     setCurrentTab('breakdown');
@@ -164,6 +205,16 @@ export const App: React.FC = () => {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* Hidden File Input for Global Re-take / Camera trigger */}
+      <input
+        type="file"
+        ref={globalFileInputRef}
+        onChange={handleGlobalFileChange}
+        accept="image/*,application/pdf"
+        capture="environment"
+        style={{ display: 'none' }}
+      />
+
       <Header
         viewMode={viewMode}
         onViewModeChange={setViewMode}
@@ -207,6 +258,8 @@ export const App: React.FC = () => {
                     onOpenDispute={handleOpenDispute}
                     onOpenEMI={handleOpenEMI}
                     onOpenShare={handleOpenShare}
+                    onRetakePhoto={triggerRetakePhoto}
+                    onChangeBillType={handleChangeBillType}
                   />
                 )}
                 {currentTab === 'emi' && (
@@ -230,7 +283,7 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Bill Type Picker — shown when auto-detection fails */}
+      {/* Bill Type Picker Modal — shown when doubt exists or user changes type */}
       {pendingUpload && (
         <BillTypePicker
           fileName={pendingUpload.fileName}
