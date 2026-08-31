@@ -128,8 +128,8 @@ export async function scanRealBill(
   if (ocrText && ocrText.trim().length > 20) {
     parsedBill = parseBillFromOCR(ocrText, detectedType);
 
-    // If parsing extracted nothing meaningful, fall back to best sample with warning
-    if (parsedBill.totalAmount === 0 && parsedBill.lineItems.length <= 1) {
+    // If parsing extracted totalAmount = 0, fall back to best sample with low-quality warning banner
+    if (!parsedBill.totalAmount || parsedBill.totalAmount === 0) {
       parsedBill = { ...getBestMatchingSample(detectedType), id: `scanned-${Date.now()}` };
       parsedBill.flags = [
         {
