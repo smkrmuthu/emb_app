@@ -373,25 +373,37 @@ function buildElectricity(raw: string): BillData {
                    ?? getStr(raw, /(09-\d{3}-\d{3}-\d{3})/);
   const consumerName = getStr(raw, /(?:consumer|name\/address)[^:\n]*[:\n]\s*([A-Z0-9.\s]+?)(?:\s+PLOT|\s+NO|\s+STREET|\n|$)/i);
 
-  // Units consumed (e.g. "Consumption [After MF & DT Loss] : 910.0")
+  // 1. Units consumed
   let units = getNum(flat, /consumption[^\d]*([\d,]+(?:\.\d+)?)/i);
-  if (!units) units = getNum(flat, /(?:units?|kwh)\s*[:\s]*([\d,]+)/i);
-  const consumedUnits = Math.round(units) || 612;
+  if (!units) {
+    // Try reading table difference: e.g. "READING 3389.0 2968.0 1 421.0"
+    const m = flat.match(/reading\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+\d+\s+(\d+(?:\.\d+)?)/i);
+    if (m) units = parseFloat(m[3]);
+  }
+  if (!units) units = getNum(flat, /(\d+)\s*units/i);
+  const consumedUnits = Math.round(units) || 0;
 
-  // Bill amount (e.g. "Net Payable Amt 1,314.00" or "Rs.1,314/-" or "Bill Amount 1314")
+  // 2. Bill Total Amount (Net Payable)
   let total = getNum(flat, /net\s*payable\s*amt[^\d]*([\d,]+\.?\d*)/i);
   if (!total) total = getNum(flat, /bill\s*amount[^\d]*rs\.?\s*([\d,]+\.?\d*)/i);
+  if (!total) total = getNum(flat, /rs\.?\s*([\d,]+)\/-/i);
   if (!total) total = getNum(flat, /(?:amount\s*payable|bill\s*amount|grand\s*total)\s*[₹₨Rs.]?\s*([\d,]+\.?\d*)/i);
-  if (!total) total = 1314;
 
-  // Dates
-  const dueDate = getStr(raw, /due\s*date[^\d]*([\d\/\-\.]{6,})/i) ?? '13/07/2026';
-  const billPeriod = getStr(flat, /(?:bill\s*period|month\s*of)\s*[:\s]*([A-Za-z0-9\/\-\.\s]+?)(?:\s+Bill|\s+Due|\n|$)/i) ?? 'June 2026';
+  // 3. Line Item charges
+  const energyCharges = getNum(flat, /energy\s*charges[^\d]*([\d,]+\.?\d*)/i);
+  const govtSubsidy   = getNum(flat, /govt\s*subsidy[^\d]*-?\s*([\d,]+\.?\d*)/i);
+  const adjustments   = getNum(flat, /adjustments[^\d]*([\d,]+\.?\d*)/i);
+  const roundOff      = getNum(flat, /round\s*off[^\d]*([\d,]+\.?\d*)/i);
 
-  // Breakdown line items
-  const energyCharges = getNum(flat, /energy\s*charges[^\d]*([\d,]+\.?\d*)/i) || 4691.50;
-  const govtSubsidy   = getNum(flat, /govt\s*subsidy[^\d]*-?\s*([\d,]+\.?\d*)/i) || 1824.75;
-  const adjustments   = getNum(flat, /adjustments[^\d]*([\d,]+\.?\d*)/i) || 1553.00;
+  // Fallback total computation from energy charges - subsidy if total is missing
+  if (!total && energyCharges > 0) {
+    total = Math.round((energyCharges - govtSubsidy - adjustments) * 100) / 100;
+  }
+
+  // Dates & Month
+  const dueDate = getStr(raw, /due\s*date[^\d]*([\d\/\-\.]{6,})/i) ?? '-';
+  const monthStr = getStr(flat, /month\s*of\s*([A-Za-z0-9\s]+?)(?:\s+Bill|\s+Due|\n|$)/i);
+  const billPeriod = monthStr ? `Month of ${monthStr.trim()}` : (getStr(flat, /bill\s*period[^\d]*([\d\/\-\.]{6,}\s*[-–]\s*[\d\/\-\.]{6,})/i) ?? 'LT Consumption Bill');
 
   // Calculate TANGEDCO Telescopic Slabs for consumedUnits
   // Slabs: 0-100 (Free), 101-200 (@ ₹2.35), 201-400 (@ ₹4.95), 401-500 (@ ₹6.80), 501+ (@ ₹8.40)
@@ -404,8 +416,15 @@ function buildElectricity(raw: string): BillData {
   ];
 
   const excessUnits = Math.max(0, consumedUnits - 500);
-
   const displayName = consumerName ? `${discom} (${consumerName.trim()})` : `${discom} — Electricity Bill`;
+
+  const lineItems: LineItem[] = [
+    ...(energyCharges > 0 ? [{ id: '1', label: `Energy Charges (${consumedUnits} units consumed)`, amount: energyCharges }] : [{ id: '1', label: `Consumed Units: ${consumedUnits} kWh`, amount: total }]),
+    ...(govtSubsidy > 0 ? [{ id: '2', label: 'Govt Subsidy Exemption', amount: -govtSubsidy }] : []),
+    ...(adjustments > 0 ? [{ id: '3', label: 'Prior Adjustments / SD', amount: -adjustments }] : []),
+    ...(roundOff !== 0 ? [{ id: '4', label: 'Round off', amount: roundOff, isSubItem: true }] : []),
+    { id: 'total', label: 'Net Amount Payable', amount: total }
+  ];
 
   return {
     id: `scanned-${Date.now()}`,
@@ -418,13 +437,8 @@ function buildElectricity(raw: string): BillData {
     billDate: todayStr(),
     dueDate,
     totalAmount: total,
-    summaryPlain: `TANGEDCO bi-monthly residential bill for ${consumedUnits} units. ${excessUnits > 0 ? `You crossed into the highest slab (501+ units) by ${excessUnits} units.` : 'Within normal slab limits.'} Govt subsidy applied: -₹${govtSubsidy.toFixed(2)}. Net payable: ₹${total.toLocaleString('en-IN')}.`,
-    lineItems: [
-      { id: '1', label: `Energy Charges (${consumedUnits} units consumed)`, amount: energyCharges },
-      { id: '2', label: 'Govt Subsidy Exemption', amount: -govtSubsidy },
-      { id: '3', label: 'Prior Adjustments / SD', amount: -adjustments },
-      { id: '4', label: 'Net Amount Payable', amount: total }
-    ],
+    summaryPlain: `TANGEDCO bi-monthly residential bill for ${consumedUnits} units. ${excessUnits > 0 ? `You crossed into the highest slab (501+ units) by ${excessUnits} units.` : 'Within subsidised slab limits (under 500 units).'}${govtSubsidy > 0 ? ` Govt subsidy applied: -₹${govtSubsidy.toFixed(2)}.` : ''} Net payable: ₹${total.toLocaleString('en-IN')}.`,
+    lineItems,
     ebDetails: {
       state: 'tamil_nadu',
       discomName: discom,
@@ -457,17 +471,17 @@ function buildElectricity(raw: string): BillData {
         : {
             id: 'flag-eb-normal',
             severity: 'good',
-            title: '✓ Consumption Within Subsidised Slabs',
-            description: `Total consumption ${consumedUnits} units is within reasonable slab boundaries. First 100 units free by TN Govt subsidy.`,
+            title: `✓ Consumption (${consumedUnits} Units) Within Subsidised Slabs`,
+            description: `Total consumption of ${consumedUnits} units is under the 500-unit high penalty threshold. First 100 units free by TN Govt subsidy.`,
             lawCitation: 'TN Govt Energy Dept G.O. Ms. No. 34'
           },
-      {
+      ...(govtSubsidy > 0 ? [{
         id: 'flag-eb-subsidy',
-        severity: 'info',
+        severity: 'info' as const,
         title: `✓ TN Govt Subsidy (-₹${govtSubsidy.toFixed(2)}) Applied`,
         description: 'First 100 units provided at ₹0 cost as mandated by the Tamil Nadu State Electricity Subsidy scheme.',
         lawCitation: 'TN Govt Energy Dept G.O. Ms. No. 34'
-      }
+      }] : [])
     ]
   };
 }
