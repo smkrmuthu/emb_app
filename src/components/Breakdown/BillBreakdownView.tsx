@@ -115,10 +115,12 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
         <div className="callout-box warning" style={{ marginBottom: '12px', borderLeftWidth: '4px' }}>
           <div className="callout-head">
             <AlertTriangle size={15} style={{ color: 'var(--warning)' }} />
-            <span style={{ fontWeight: 700 }}>Could Not Read Photo Clearly</span>
+            <span style={{ fontWeight: 700 }}>Photo Blurry or Unreadable — Re-take / Re-upload</span>
           </div>
-          <div className="callout-body" style={{ marginTop: '4px' }}>
-            Thermal paper photo was blurry or low-contrast. Tap "Edit Amounts" to adjust numbers or re-take photo in bright light.
+          <div className="callout-body" style={{ marginTop: '4px', lineHeight: 1.45 }}>
+            {bill.type === 'electricity'
+              ? 'Electricity bills carry NO GST (0%) — charges are calculated using State Electricity Regulatory Commission (SERC) slab rates & subsidies. The photo was too blurry to read the exact units/total clearly. Please re-take a sharp photo in good light or re-upload the original PDF.'
+              : 'The uploaded image was blurry or low-contrast. Please re-take a clear photo in bright light or tap "Edit Amounts" to enter the exact values.'}
           </div>
           <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
             <button
@@ -127,7 +129,7 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
               onClick={onRetakePhoto}
             >
               <Camera size={11} />
-              <span>📷 Re-take Photo</span>
+              <span>📷 Re-take / Re-upload</span>
             </button>
             <button
               className="btn-outline"

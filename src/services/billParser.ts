@@ -482,11 +482,18 @@ function buildElectricity(raw: string): BillData {
             description: `Total consumption of ${consumedUnits} units is under the 500-unit high penalty threshold. First 100 units free by TN Govt subsidy.`,
             lawCitation: 'TN Govt Energy Dept G.O. Ms. No. 34'
           },
+      {
+        id: 'flag-eb-no-gst',
+        severity: 'good',
+        title: '✓ Electricity Supply is Exempt from GST (0% GST)',
+        description: 'Under Indian tax law, domestic electricity consumption is exempt from GST. Bills are governed by State Electricity Regulatory Commission (SERC) tariff slabs, not restaurant GST.',
+        lawCitation: 'CBIC Notification No. 12/2017 – Central Tax (Rate)'
+      },
       ...(govtSubsidy > 0 ? [{
         id: 'flag-eb-subsidy',
         severity: 'info' as const,
         title: `✓ TN Govt Subsidy (-₹${govtSubsidy.toFixed(2)}) Applied`,
-        description: 'First 100 units provided at ₹0 cost as mandated by the Tamil Nadu State Electricity Subsidy scheme.',
+        description: 'First 100 units provided at ₹0 cost + tariff subsidies as mandated by the Tamil Nadu State Electricity Subsidy scheme.',
         lawCitation: 'TN Govt Energy Dept G.O. Ms. No. 34'
       }] : [])
     ]
