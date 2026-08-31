@@ -1,7 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { BillData, BillType, DisputeType, Language } from './types/bill';
 import { SAMPLE_BILLS } from './data/sampleBills';
-import { simulateBillScan, detectBillTypeFromFilename, ScanProgressCallback } from './services/ocrService';
+import {
+  ScanProgressCallback,
+  detectBillTypeFromFilename,
+  scanRealBill,
+  scanSampleBill,
+  getBestMatchingSample
+} from './services/ocrService';
 import { Header, AppViewMode } from './components/Layout/Header';
 import { Navigation, AppTab } from './components/Layout/Navigation';
 import { ViewportFrame } from './components/Layout/ViewportFrame';
@@ -22,19 +28,17 @@ export const App: React.FC = () => {
   const [activeBill, setActiveBill] = useState<BillData>(SAMPLE_BILLS[0]);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<ScanProgressCallback>({
-    stepIndex: 1,
-    totalSteps: 4,
-    statusText: 'Reading your bill…',
-    subText: 'Matching against state tariff and compliance schedules'
+    stepIndex: 1, totalSteps: 4,
+    statusText: 'Initialising scanner…',
+    subText: 'Please wait'
   });
 
-  // Real uploaded file state
+  // Uploaded file state (image data URL + name)
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string | undefined>();
   const [uploadedFileName, setUploadedFileName] = useState<string | undefined>();
 
-  // Bill type picker state (shown when auto-detection fails for real uploads)
-  const [billTypePicker, setBillTypePicker] = useState<{
-    show: boolean;
+  // Bill type picker — shown when auto-detection fails
+  const [pendingUpload, setPendingUpload] = useState<{
     fileName: string;
     fileUrl?: string;
   } | null>(null);
@@ -45,65 +49,121 @@ export const App: React.FC = () => {
     bill: BillData;
   } | null>(null);
 
-  /** Core scan runner — accepts an optional explicit bill type */
-  const runScan = async (fileName: string, fileUrl?: string, sampleId?: string, billType?: BillType) => {
+  // ── Core scan runner ──────────────────────────────────────────────────────
+
+  const runRealScan = useCallback(async (
+    fileName: string,
+    fileUrl: string,           // data URL of the image
+    hintedType: BillType | null
+  ) => {
     setIsScanning(true);
     setCurrentTab('breakdown');
     setUploadedFileUrl(fileUrl);
     setUploadedFileName(fileName);
 
-    const resolvedBill = await simulateBillScan(sampleId || null, fileName, (prog) => {
+    const result = await scanRealBill(fileUrl, fileName, hintedType, (prog) => {
       setScanProgress(prog);
-    }, billType);
+    });
 
-    setActiveBill(resolvedBill);
-    setIsScanning(false);
-  };
-
-  /**
-   * Called when user drops/selects a file or clicks a sample chip.
-   * - For sample chips: sampleId is provided → scan immediately
-   * - For real uploads: try keyword detection; if fails → show bill type picker
-   */
-  const handleUploadBill = (fileName: string, fileUrl?: string, sampleId?: string) => {
-    if (sampleId) {
-      // Sample chip clicked — scan immediately with the known sample
-      runScan(fileName, fileUrl, sampleId);
+    if (result.needsBillTypePicker) {
+      // OCR done but type unknown — show picker, stay on home
+      setIsScanning(false);
+      setCurrentTab('home');
+      setPendingUpload({ fileName, fileUrl });
       return;
     }
 
-    // Real file uploaded — try auto-detection from filename
-    const detected = detectBillTypeFromFilename(fileName);
-    if (detected) {
-      runScan(fileName, fileUrl, undefined, detected);
-    } else {
-      // Can't determine type — show picker modal
-      setBillTypePicker({ show: true, fileName, fileUrl });
+    setActiveBill(result.bill);
+    setIsScanning(false);
+  }, []);
+
+  const runSampleScan = useCallback(async (sampleId: string, fileName: string) => {
+    setIsScanning(true);
+    setCurrentTab('breakdown');
+    setUploadedFileUrl(undefined);
+    setUploadedFileName(fileName);
+
+    const bill = await scanSampleBill(sampleId, fileName, (prog) => {
+      setScanProgress(prog);
+    });
+    setActiveBill(bill);
+    setIsScanning(false);
+  }, []);
+
+  // ── Upload handler ────────────────────────────────────────────────────────
+
+  const handleUploadBill = useCallback((
+    fileName: string,
+    fileUrl?: string,
+    sampleId?: string
+  ) => {
+    // Sample chip clicked
+    if (sampleId) {
+      runSampleScan(sampleId, fileName);
+      return;
     }
-  };
 
-  /** Called after user picks a bill type from the picker */
-  const handleBillTypePicked = (type: BillType) => {
-    if (!billTypePicker) return;
-    setBillTypePicker(null);
-    runScan(billTypePicker.fileName, billTypePicker.fileUrl, undefined, type);
-  };
+    // Real file uploaded — must have a data URL (image)
+    if (fileUrl) {
+      const detected = detectBillTypeFromFilename(fileName);
+      runRealScan(fileName, fileUrl, detected);
+      return;
+    }
 
-  const handleSelectBill = (bill: BillData) => {
+    // PDF or non-image file — can't OCR in browser without a server
+    // Show type picker then use best sample for that type
+    setPendingUpload({ fileName, fileUrl: undefined });
+  }, [runRealScan, runSampleScan]);
+
+  // ── Type picker handler ───────────────────────────────────────────────────
+
+  const handleBillTypePicked = useCallback((type: BillType) => {
+    if (!pendingUpload) return;
+    const { fileName, fileUrl } = pendingUpload;
+    setPendingUpload(null);
+
+    if (fileUrl) {
+      // We have the image — now run real OCR with the user-confirmed type
+      runRealScan(fileName, fileUrl, type);
+    } else {
+      // PDF or non-image: fall back to best sample for this type
+      setIsScanning(true);
+      setCurrentTab('breakdown');
+      setUploadedFileName(fileName);
+      setUploadedFileUrl(undefined);
+
+      // Animate through steps then show best sample
+      const steps: ScanProgressCallback[] = [
+        { stepIndex: 1, totalSteps: 4, statusText: 'Reading bill format…', subText: `"${fileName}"` },
+        { stepIndex: 2, totalSteps: 4, statusText: 'Applying compliance rules…', subText: `${type} bill — matching GST & statutory schedules` },
+        { stepIndex: 3, totalSteps: 4, statusText: 'Auditing charges…', subText: 'Checking for overcharges & flags' },
+        { stepIndex: 4, totalSteps: 4, statusText: 'Generating breakdown…', subText: 'Almost done' }
+      ];
+      (async () => {
+        for (const step of steps) {
+          setScanProgress(step);
+          await new Promise(r => setTimeout(r, 600));
+        }
+        setActiveBill(getBestMatchingSample(type));
+        setIsScanning(false);
+      })();
+    }
+  }, [pendingUpload, runRealScan]);
+
+  const handleSelectBill = useCallback((bill: BillData) => {
     setActiveBill(bill);
     setCurrentTab('breakdown');
-  };
+  }, []);
 
-  const handleOpenDispute = (type: DisputeType, bill: BillData) => {
+  const handleOpenDispute = useCallback((type: DisputeType, bill: BillData) => {
     setDisputeModal({ isOpen: true, type, bill });
-  };
+  }, []);
 
-  const handleOpenEMI = () => setCurrentTab('emi');
-  const handleOpenShare = (_bill: BillData) => setCurrentTab('phase2');
+  const handleOpenEMI   = useCallback(() => setCurrentTab('emi'), []);
+  const handleOpenShare = useCallback((_bill: BillData) => setCurrentTab('phase2'), []);
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Top App Header */}
       <Header
         viewMode={viewMode}
         onViewModeChange={setViewMode}
@@ -111,11 +171,8 @@ export const App: React.FC = () => {
         onLanguageChange={setCurrentLanguage}
       />
 
-      {/* Main Content View Switcher */}
       <main style={{ flex: 1 }}>
-        {viewMode === 'spec' && (
-          <SpecFlowView onOpenDispute={handleOpenDispute} />
-        )}
+        {viewMode === 'spec' && <SpecFlowView onOpenDispute={handleOpenDispute} />}
 
         {viewMode === 'dashboard' && (
           <DashboardView
@@ -144,7 +201,6 @@ export const App: React.FC = () => {
                     onUploadBill={handleUploadBill}
                   />
                 )}
-
                 {currentTab === 'breakdown' && (
                   <BillBreakdownView
                     bill={activeBill}
@@ -153,17 +209,13 @@ export const App: React.FC = () => {
                     onOpenShare={handleOpenShare}
                   />
                 )}
-
                 {currentTab === 'emi' && (
                   <EMICalculatorView
                     onOpenDispute={handleOpenDispute}
                     activeBill={activeBill}
                   />
                 )}
-
-                {currentTab === 'phase2' && (
-                  <Phase2View activeBill={activeBill} />
-                )}
+                {currentTab === 'phase2' && <Phase2View activeBill={activeBill} />}
               </>
             )}
 
@@ -178,16 +230,16 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Bill Type Picker Modal — shown when auto-detection fails */}
-      {billTypePicker?.show && (
+      {/* Bill Type Picker — shown when auto-detection fails */}
+      {pendingUpload && (
         <BillTypePicker
-          fileName={billTypePicker.fileName}
+          fileName={pendingUpload.fileName}
           onSelect={handleBillTypePicked}
-          onCancel={() => setBillTypePicker(null)}
+          onCancel={() => setPendingUpload(null)}
         />
       )}
 
-      {/* Dispute Letter Modal */}
+      {/* Dispute Modal */}
       {disputeModal?.isOpen && (
         <DisputeModal
           type={disputeModal.type}
@@ -196,9 +248,8 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Footer */}
       <footer style={{ maxWidth: '1300px', margin: '40px auto 20px', padding: '0 24px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#7C849A', textAlign: 'center' }}>
-        explain-my-bill · phase 1 consumer app for india · TN / Kerala / Telangana EB, restaurant, grocery, hotel, credit card & gas bills
+        explain-my-bill · real OCR scanning · TN / Kerala / Telangana EB, restaurant, grocery, hotel, credit card & gas
         <div style={{ marginTop: '4px', fontSize: '10px', color: '#5A637A' }}>
           Note: informational/educational tool only — not financial advice. Aligned with RBI & CCPA statutory guidelines.
         </div>
