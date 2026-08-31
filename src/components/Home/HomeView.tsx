@@ -6,7 +6,7 @@ import { Zap, CreditCard, Utensils, ShoppingCart, Hotel, Flame, AlertCircle, Che
 
 interface HomeViewProps {
   onSelectBill: (bill: BillData) => void;
-  onUploadBill: (fileName: string, sampleId?: string) => void;
+  onUploadBill: (fileName: string, fileUrl?: string, sampleId?: string) => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({ onSelectBill, onUploadBill }) => {
@@ -67,8 +67,8 @@ export const HomeView: React.FC<HomeViewProps> = ({ onSelectBill, onUploadBill }
         ))}
       </div>
 
-      {/* Upload Zone */}
-      <BillUploader onFileSelected={(fileName, billId) => onUploadBill(fileName, billId || 'tn-eb-612')} />
+      {/* Upload Zone — passes filename + data URL for real files */}
+      <BillUploader onFileSelected={(fileName, fileUrl) => onUploadBill(fileName, fileUrl)} />
 
       {/* Quick Sample Selector */}
       <div className="quick-samples-section">
@@ -81,7 +81,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onSelectBill, onUploadBill }
             <button
               key={bill.id}
               className="sample-chip"
-              onClick={() => onUploadBill(`Sample_${bill.billerName}.pdf`, bill.id)}
+              onClick={() => onUploadBill(`Sample_${bill.billerName}.pdf`, undefined, bill.id)}
             >
               <span className="chip-icon">{getCategoryIcon(bill.type)}</span>
               <div>
@@ -128,7 +128,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onSelectBill, onUploadBill }
                     )}
                   </div>
                 </div>
-
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div className="amt">₹{bill.totalAmount.toLocaleString('en-IN')}</div>
                   <ChevronRight size={14} style={{ color: 'var(--muted)' }} />

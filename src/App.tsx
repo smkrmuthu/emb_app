@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { BillData, DisputeType, Language } from './types/bill';
+import { BillData, BillType, DisputeType, Language } from './types/bill';
 import { SAMPLE_BILLS } from './data/sampleBills';
-import { simulateBillScan, ScanProgressCallback } from './services/ocrService';
+import { simulateBillScan, detectBillTypeFromFilename, ScanProgressCallback } from './services/ocrService';
 import { Header, AppViewMode } from './components/Layout/Header';
 import { Navigation, AppTab } from './components/Layout/Navigation';
 import { ViewportFrame } from './components/Layout/ViewportFrame';
 import { HomeView } from './components/Home/HomeView';
+import { BillTypePicker } from './components/Home/BillTypePicker';
 import { ScanningView } from './components/Scanner/ScanningView';
 import { BillBreakdownView } from './components/Breakdown/BillBreakdownView';
 import { EMICalculatorView } from './components/EMI/EMICalculatorView';
@@ -27,22 +28,65 @@ export const App: React.FC = () => {
     subText: 'Matching against state tariff and compliance schedules'
   });
 
+  // Real uploaded file state
+  const [uploadedFileUrl, setUploadedFileUrl] = useState<string | undefined>();
+  const [uploadedFileName, setUploadedFileName] = useState<string | undefined>();
+
+  // Bill type picker state (shown when auto-detection fails for real uploads)
+  const [billTypePicker, setBillTypePicker] = useState<{
+    show: boolean;
+    fileName: string;
+    fileUrl?: string;
+  } | null>(null);
+
   const [disputeModal, setDisputeModal] = useState<{
     isOpen: boolean;
     type: DisputeType;
     bill: BillData;
   } | null>(null);
 
-  const handleUploadBill = async (fileName: string, sampleId?: string) => {
+  /** Core scan runner — accepts an optional explicit bill type */
+  const runScan = async (fileName: string, fileUrl?: string, sampleId?: string, billType?: BillType) => {
     setIsScanning(true);
     setCurrentTab('breakdown');
+    setUploadedFileUrl(fileUrl);
+    setUploadedFileName(fileName);
 
     const resolvedBill = await simulateBillScan(sampleId || null, fileName, (prog) => {
       setScanProgress(prog);
-    });
+    }, billType);
 
     setActiveBill(resolvedBill);
     setIsScanning(false);
+  };
+
+  /**
+   * Called when user drops/selects a file or clicks a sample chip.
+   * - For sample chips: sampleId is provided → scan immediately
+   * - For real uploads: try keyword detection; if fails → show bill type picker
+   */
+  const handleUploadBill = (fileName: string, fileUrl?: string, sampleId?: string) => {
+    if (sampleId) {
+      // Sample chip clicked — scan immediately with the known sample
+      runScan(fileName, fileUrl, sampleId);
+      return;
+    }
+
+    // Real file uploaded — try auto-detection from filename
+    const detected = detectBillTypeFromFilename(fileName);
+    if (detected) {
+      runScan(fileName, fileUrl, undefined, detected);
+    } else {
+      // Can't determine type — show picker modal
+      setBillTypePicker({ show: true, fileName, fileUrl });
+    }
+  };
+
+  /** Called after user picks a bill type from the picker */
+  const handleBillTypePicked = (type: BillType) => {
+    if (!billTypePicker) return;
+    setBillTypePicker(null);
+    runScan(billTypePicker.fileName, billTypePicker.fileUrl, undefined, type);
   };
 
   const handleSelectBill = (bill: BillData) => {
@@ -54,13 +98,8 @@ export const App: React.FC = () => {
     setDisputeModal({ isOpen: true, type, bill });
   };
 
-  const handleOpenEMI = () => {
-    setCurrentTab('emi');
-  };
-
-  const handleOpenShare = (_bill: BillData) => {
-    setCurrentTab('phase2');
-  };
+  const handleOpenEMI = () => setCurrentTab('emi');
+  const handleOpenShare = (_bill: BillData) => setCurrentTab('phase2');
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -82,7 +121,7 @@ export const App: React.FC = () => {
           <DashboardView
             activeBill={activeBill}
             onSelectBill={handleSelectBill}
-            onUploadBill={handleUploadBill}
+            onUploadBill={(fileName, sampleId) => handleUploadBill(fileName, undefined, sampleId)}
             onOpenDispute={handleOpenDispute}
             onOpenEMI={handleOpenEMI}
             onOpenShare={handleOpenShare}
@@ -92,7 +131,11 @@ export const App: React.FC = () => {
         {viewMode === 'phone' && (
           <ViewportFrame>
             {isScanning ? (
-              <ScanningView progress={scanProgress} />
+              <ScanningView
+                progress={scanProgress}
+                uploadedFileUrl={uploadedFileUrl}
+                uploadedFileName={uploadedFileName}
+              />
             ) : (
               <>
                 {currentTab === 'home' && (
@@ -134,6 +177,15 @@ export const App: React.FC = () => {
           </ViewportFrame>
         )}
       </main>
+
+      {/* Bill Type Picker Modal — shown when auto-detection fails */}
+      {billTypePicker?.show && (
+        <BillTypePicker
+          fileName={billTypePicker.fileName}
+          onSelect={handleBillTypePicked}
+          onCancel={() => setBillTypePicker(null)}
+        />
+      )}
 
       {/* Dispute Letter Modal */}
       {disputeModal?.isOpen && (
