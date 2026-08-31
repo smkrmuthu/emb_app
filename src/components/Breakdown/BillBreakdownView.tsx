@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { BillData, BillFlag, DisputeType } from '../../types/bill';
 import { EBVisualizer } from './EBVisualizer';
-import { Volume2, FileText, CheckCircle2, AlertTriangle, AlertOctagon, Info, Share2, Percent, Camera, Tag } from 'lucide-react';
+import { EditBillModal } from './EditBillModal';
+import { Volume2, FileText, CheckCircle2, AlertTriangle, AlertOctagon, Info, Share2, Percent, Camera, Tag, Edit3 } from 'lucide-react';
 
 interface BillBreakdownViewProps {
   bill: BillData;
@@ -10,6 +11,7 @@ interface BillBreakdownViewProps {
   onOpenShare: (bill: BillData) => void;
   onRetakePhoto?: () => void;
   onChangeBillType?: () => void;
+  onUpdateBill?: (bill: BillData) => void;
 }
 
 export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
@@ -18,9 +20,11 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
   onOpenEMI,
   onOpenShare,
   onRetakePhoto,
-  onChangeBillType
+  onChangeBillType,
+  onUpdateBill
 }) => {
-  const [isSpeaking, setIsSpeaking] = React.useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
 
   const isLowQuality = bill.flags.some(f => f.id === 'ocr-low-quality') || (bill.totalAmount === 0 && bill.lineItems.length <= 1);
 
@@ -76,24 +80,33 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
         </div>
       </div>
 
-      {/* Top Quick Actions Bar (Re-take / Change Type) */}
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+      {/* Top Quick Actions Bar (Re-take / Change Type / Edit Values) */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '10px' }}>
         <button
           onClick={onRetakePhoto}
           className="btn-outline"
-          style={{ flex: 1, padding: '5px 8px', fontSize: '10px', borderRadius: '8px', justifyContent: 'center' }}
+          style={{ flex: 1, padding: '5px 4px', fontSize: '9.5px', borderRadius: '8px', justifyContent: 'center' }}
         >
-          <Camera size={12} />
-          <span>Re-take / Upload Photo</span>
+          <Camera size={11} />
+          <span>Re-take</span>
         </button>
 
         <button
           onClick={onChangeBillType}
           className="btn-outline"
-          style={{ flex: 1, padding: '5px 8px', fontSize: '10px', borderRadius: '8px', justifyContent: 'center' }}
+          style={{ flex: 1, padding: '5px 4px', fontSize: '9.5px', borderRadius: '8px', justifyContent: 'center' }}
         >
-          <Tag size={12} />
-          <span>Change Bill Type</span>
+          <Tag size={11} />
+          <span>Category</span>
+        </button>
+
+        <button
+          onClick={() => setIsEditing(true)}
+          className="btn-outline"
+          style={{ flex: 1, padding: '5px 4px', fontSize: '9.5px', borderRadius: '8px', justifyContent: 'center' }}
+        >
+          <Edit3 size={11} />
+          <span>Edit Amounts</span>
         </button>
       </div>
 
@@ -105,24 +118,24 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
             <span style={{ fontWeight: 700 }}>Could Not Read Photo Clearly</span>
           </div>
           <div className="callout-body" style={{ marginTop: '4px' }}>
-            The uploaded image was blurry, dark, or hard to read. Please re-take a clear photo in good light or select the correct bill type manually.
+            Thermal paper photo was blurry or low-contrast. Tap "Edit Amounts" to adjust numbers or re-take photo in bright light.
           </div>
-          <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+          <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
             <button
               className="btn-gold"
-              style={{ padding: '6px 12px', fontSize: '10.5px' }}
+              style={{ padding: '6px 10px', fontSize: '10px' }}
               onClick={onRetakePhoto}
             >
-              <Camera size={12} />
-              <span>📷 Re-take / Upload Clear Photo</span>
+              <Camera size={11} />
+              <span>📷 Re-take Photo</span>
             </button>
             <button
               className="btn-outline"
-              style={{ padding: '6px 10px', fontSize: '10.5px' }}
-              onClick={onChangeBillType}
+              style={{ padding: '6px 10px', fontSize: '10px' }}
+              onClick={() => setIsEditing(true)}
             >
-              <Tag size={12} />
-              <span>Select Bill Type</span>
+              <Edit3 size={11} />
+              <span>✏️ Edit Amounts</span>
             </button>
           </div>
         </div>
@@ -157,9 +170,18 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
 
       {/* Line Items List */}
       <div className="line-items-container">
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--muted)', marginBottom: '4px' }}>
-          ITEMIZED CHARGES DECODED
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--muted)' }}>
+            ITEMIZED CHARGES DECODED
+          </div>
+          <button
+            onClick={() => setIsEditing(true)}
+            style={{ background: 'none', border: 'none', color: 'var(--gold)', fontSize: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px' }}
+          >
+            <Edit3 size={10} /> Edit
+          </button>
         </div>
+
         {bill.lineItems.map((item) => (
           <div key={item.id} className={`breakdown-row ${item.isSubItem ? 'sub-row' : ''}`}>
             <span>
@@ -225,6 +247,18 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
           <span>Forward Plain Summary to Family</span>
         </button>
       </div>
+
+      {/* Edit Values Modal */}
+      {isEditing && (
+        <EditBillModal
+          bill={bill}
+          onSave={(updated) => {
+            onUpdateBill?.(updated);
+            setIsEditing(false);
+          }}
+          onClose={() => setIsEditing(false)}
+        />
+      )}
     </div>
   );
 };

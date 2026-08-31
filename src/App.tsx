@@ -260,6 +260,7 @@ export const App: React.FC = () => {
                     onOpenShare={handleOpenShare}
                     onRetakePhoto={triggerRetakePhoto}
                     onChangeBillType={handleChangeBillType}
+                    onUpdateBill={setActiveBill}
                   />
                 )}
                 {currentTab === 'emi' && (

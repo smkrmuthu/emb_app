@@ -7,9 +7,10 @@ import { BillData, BillFlag, BillType, GSTDetails, LineItem } from '../types/bil
 
 // ─── Generic helpers ─────────────────────────────────────────────────────────
 
-/** All positive numbers in a string, preserving order */
+/** All positive numbers in a string, preserving order and handling OCR spaced decimals e.g. 693. 00 */
 function nums(text: string): number[] {
-  return (text.match(/\b\d[\d,]*\.?\d*\b/g) ?? [])
+  const sanitized = text.replace(/(\d+)\s*\.\s*(\d{1,2})\b/g, '$1.$2');
+  return (sanitized.match(/\b\d[\d,]*\.?\d*\b/g) ?? [])
     .map(s => parseFloat(s.replace(/,/g, '')))
     .filter(n => !isNaN(n) && n > 0);
 }
@@ -23,7 +24,9 @@ function lastNum(line: string): number {
 /** Regex-based safe extractor → number */
 function getNum(text: string, re: RegExp): number {
   const m = text.match(re);
-  return m ? parseFloat((m[1] ?? '0').replace(/,/g, '')) : 0;
+  if (!m) return 0;
+  const raw = (m[1] ?? '0').replace(/\s+/g, '').replace(/,/g, '');
+  return parseFloat(raw) || 0;
 }
 
 /** Regex-based safe extractor → string */
