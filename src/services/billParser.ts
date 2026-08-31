@@ -78,156 +78,139 @@ function parseRestaurant(raw: string): RestaurantParsed {
   const billNumber = getStr(text, /bill\s*no[.:\s]*\s*(\w+)/i)
                   ?? getStr(text, /token\s*no[.:\s]*\s*\n?\s*(\w+)/i);
 
-  // ── CGST / SGST ──────────────────────────────────────────────────────
-  // Strategy: find the line, extract ALL numbers.
-  // Rate = first small number (≤15), Amount = last larger number
+  // ── Grand Total ─────────  // ── Sub Total ────────────────────────────────────────────────────────
+  // Handle "Total Qty: 3  Sub Total 76.18" or "Sub Total 76.18"
+  let subtotal = getNum(flat, /sub\s*total\s*[₹₨Rs.]?\s*([\d,]+\.?\d*)/i);
+
+  if (!subtotal) {
+    const subLine = lines.find(l => /\bsub\s*total\b/i.test(l) || /\bsubtotal\b/i.test(l));
+    if (subLine) {
+      // Get numbers on the line that are NOT immediately preceded by "Qty"
+      const lineWithoutQty = subLine.replace(/qty\s*[:\s]*\d+/gi, '');
+      subtotal = lastNum(lineWithoutQty);
+    }
+  }
+
+  // ── CGST / SGST / IGST ───────────────────────────────────────────────
   let cgstRate = 2.5, cgst = 0, sgstRate = 2.5, sgst = 0;
 
   const cgstLine = lines.find(l => /\bCGST\b/i.test(l));
   if (cgstLine) {
     const allNums = nums(cgstLine);
     const rate = allNums.find(n => n <= 15);
-    const amt  = [...allNums].reverse().find(n => n > 5);
+    const amt  = [...allNums].reverse().find(n => n > 0 && n !== rate);
     if (rate) cgstRate = rate;
-    if (amt && amt !== rate) cgst = amt;
-    else if (allNums.length === 1) cgst = allNums[0];
+    if (amt) cgst = amt;
   }
 
   const sgstLine = lines.find(l => /\bSGST\b/i.test(l));
   if (sgstLine) {
     const allNums = nums(sgstLine);
     const rate = allNums.find(n => n <= 15);
-    const amt  = [...allNums].reverse().find(n => n > 5);
+    const amt  = [...allNums].reverse().find(n => n > 0 && n !== rate);
     if (rate) sgstRate = rate;
-    if (amt && amt !== rate) sgst = amt;
-    else if (allNums.length === 1) sgst = allNums[0];
+    if (amt) sgst = amt;
   }
 
   const igst = lastNum(lines.find(l => /\bIGST\b/i.test(l)) ?? '');
 
   // ── Grand Total ──────────────────────────────────────────────────────
-  // 1. "Grand Total ₹693.00"  2. "Grand Total 693.00"  3. "Grand-Total 693"
-  let grandTotal = getNum(flat, /grand\s*total\s*[₹₨Rs.]?\s*([\d,]+\.?\d*)/i);
+  // Only look at lines after the item table header, avoiding Token No in header!
+  const headerCutoff = lines.findIndex(l => /token|cashier|bill\s*no/i.test(l));
+  const footerLines = headerCutoff >= 0 ? lines.slice(headerCutoff + 1) : lines;
+  const footerText = footerLines.join(' ');
+
+  let grandTotal = getNum(footerText, /grand\s*total\s*[₹₨Rs.zZ2]?\s*([\d,]+\.?\d*)/i);
 
   if (!grandTotal) {
-    grandTotal = getNum(flat, /(?:total\s*amount|net\s*total|amount\s*payable|net\s*payable)\s*[₹₨]?\s*([\d,]+\.?\d*)/i);
+    const gtLine = footerLines.find(l => /grand\s*total/i.test(l));
+    if (gtLine) grandTotal = lastNum(gtLine);
   }
   if (!grandTotal) {
-    // Look for the line that says just "Total" and get its last number
-    const totalLine = lines.find(l => /^\s*Total\s*[₹₨]?\s*[\d,]/i.test(l) && !/cgst|sgst|sub|qty/i.test(l));
-    if (totalLine) grandTotal = lastNum(totalLine);
+    const netLine = footerLines.find(l => /(?:net\s*payable|amount\s*payable|bill\s*total)/i.test(l));
+    if (netLine) grandTotal = lastNum(netLine);
   }
 
-  // ── Sub Total ────────────────────────────────────────────────────────
-  // Handle multi-line: "Total Qty: 5  Sub  660.00 \n Total"  OR "Sub Total  660.00"
-  let subtotal = getNum(flat, /sub\s*total\s*[₹₨]?\s*([\d,]+\.?\d*)/i);
+  // ── Line Items Parsing (handles both numbered & unnumbered receipt items) ──
+  const items: RestaurantParsed['items'] = [];
 
-  if (!subtotal) {
-    // The "Sub" keyword followed by amount (possibly on next line with "Total")
-    for (let i = 0; i < lines.length; i++) {
-      if (/\bsub\b/i.test(lines[i])) {
-        const combined = lines.slice(i, i + 3).join(' ');
-        const n = getNum(combined, /sub\s*(?:total)?\s*[₹₨]?\s*([\d,]+\.?\d*)/i);
-        if (n) { subtotal = n; break; }
-        // last number on sub line
-        const ln = lastNum(lines[i]);
-        if (ln > (cgst + sgst)) { subtotal = ln; break; }
-      }
-    }
-  }
+  // Identify table boundaries
+  let iStart = lines.findIndex(l => /item|description|qty|price|amount/i.test(l));
+  let iEnd   = lines.findIndex(l => /total\s*qty|sub\s*total|subtotal|\bcgst\b/i.test(l));
 
-  // Infer from grand total - gst
-  if (!subtotal && grandTotal > 0 && (cgst > 0 || sgst > 0)) {
-    subtotal = Math.round((grandTotal - cgst - sgst) * 100) / 100;
-  }
-
-  // ── Line items ───────────────────────────────────────────────────────
-  // Find table section: between header row and "Total Qty" / "Sub Total"
-  let iStart = lines.findIndex(l => /no\.?\s*item|qty\.?\s*price|no\.\s*qty/i.test(l));
-  let iEnd   = lines.findIndex(l => /total\s*qty|sub\s*total/i.test(l));
-
-  if (iStart === -1) {
-    // fallback: start after date/cashier block
-    iStart = lines.findIndex(l => /cashier|token/i.test(l)) + 1;
-  }
-  if (iEnd === -1) {
-    iEnd = lines.findIndex(l => /\bCGST\b/i.test(l));
-  }
+  if (iStart === -1) iStart = lines.findIndex(l => /cashier|token|dine\s*in|take\s*away/i.test(l)) + 1;
+  if (iEnd === -1) iEnd = lines.findIndex(l => /\b(cgst|sgst|grand\s*total)\b/i.test(l));
   if (iStart < 0) iStart = 0;
-  if (iEnd <= iStart) iEnd = lines.length;
+  if (iEnd <= iStart || iEnd > lines.length) iEnd = lines.length;
 
   const tableLines = lines.slice(iStart + 1, iEnd);
 
-  const items: RestaurantParsed['items'] = [];
-
-  let curLabel = '';
-  let curNums: number[] = [];
-
-  const flush = () => {
-    if (!curLabel || curNums.length < 2) return;
-    // Try all combinations of (qty, rate, amt) from the collected numbers
-    for (let a = 0; a < curNums.length - 1; a++) {
-      for (let b = a + 1; b < curNums.length; b++) {
-        for (let c = b + 1; c < curNums.length; c++) {
-          const [q, r, amt] = [curNums[a], curNums[b], curNums[c]];
-          if (Number.isInteger(q) && q >= 1 && q <= 50 && r > 0 && approxEq(q * r, amt, 2)) {
-            items.push({ label: curLabel.trim(), qty: q, rate: r, amount: amt });
-            return;
-          }
-        }
-      }
-    }
-    // 2-number fallback: qty=1, rate=amount
-    if (curNums.length >= 1) {
-      const amt = curNums[curNums.length - 1];
-      if (amt > 0 && amt < 5000) {
-        items.push({ label: curLabel.trim(), qty: 1, rate: amt, amount: amt });
-      }
-    }
-  };
-
   for (const line of tableLines) {
-    // Skip header rows and purely numeric/empty lines
-    if (/^(no|qty|price|amount|sl|sr)\.?$/i.test(line)) continue;
+    if (/^(no|qty|price|amount|sl|sr|item)\.?$/i.test(line)) continue;
 
-    const numbered = line.match(/^(\d+)\s+(.*)/);
-    if (numbered) {
-      flush();
-      curLabel = '';
-      curNums  = [];
+    const lineNums = nums(line);
+    if (lineNums.length === 0) continue;
 
-      const rest = numbered[2];
-      const lineNums = nums(rest);
-      // Label = text before the first number in rest
-      const labelPart = rest.replace(/\s+[\d,.].*$/, '').trim();
-      curLabel = labelPart.length > 1 ? labelPart : rest.split(/\s+\d/)[0].trim();
-      curNums  = lineNums;
-    } else if (curLabel) {
-      // continuation line — might be label text or just numbers
-      const lineNums = nums(line);
-      if (lineNums.length === 0) {
-        curLabel += ' ' + line.replace(/^\d+\s*/, '').trim();
-      } else {
-        curNums.push(...lineNums);
+    // Remove leading line number if present e.g. "1 Idly 33.33 33.33"
+    let cleanLine = line.replace(/^\d+\s+/, '');
+    const cleanNums = nums(cleanLine);
+
+    if (cleanNums.length >= 2) {
+      // Case A: "Idly ( 2 Pcs) 1 33.33 33.33" -> qty=1, rate=33.33, amt=33.33
+      // Case B: "Medhu Vadai 1 33.33 33.33"
+      const amt = cleanNums[cleanNums.length - 1];
+      const rate = cleanNums.length >= 2 ? cleanNums[cleanNums.length - 2] : amt;
+      const qty = cleanNums.length >= 3 ? cleanNums[cleanNums.length - 3] : 1;
+
+      // Label is text before the first price number
+      const label = cleanLine.split(/\s+\d+[.,]?\d*/)[0].replace(/[()]/g, '').trim();
+
+      if (label.length >= 2 && amt > 0 && amt < 10000 && !/total|qty|sub|cgst|sgst/i.test(label)) {
+        items.push({
+          label: label || 'Food Item',
+          qty: qty > 0 && qty <= 50 ? qty : 1,
+          rate: rate > 0 ? rate : amt,
+          amount: amt
+        });
+      }
+    } else if (cleanNums.length === 1) {
+      // Single price line e.g. "Gas 9.52" or "Filter Coffee 40"
+      const amt = cleanNums[0];
+      const label = cleanLine.replace(/\s+\d+[.,]?\d*/, '').trim();
+
+      if (label.length >= 2 && amt > 0 && amt < 10000 && !/total|qty|sub|cgst|sgst/i.test(label)) {
+        items.push({
+          label: label || 'Item',
+          qty: 1,
+          rate: amt,
+          amount: amt
+        });
       }
     }
   }
-  flush();
 
-  // If no items parsed but we know totals, create a summary item
-  if (items.length === 0 && subtotal > 0) {
-    items.push({ label: 'Food & Beverages (total)', qty: 1, rate: subtotal, amount: subtotal });
+  // Recompute subtotal from parsed items if missing or mismatched
+  const itemsSum = Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+
+  if (itemsSum > 0 && (!subtotal || Math.abs(subtotal - itemsSum) > 5)) {
+    subtotal = itemsSum;
   }
 
-  // Recompute subtotal from items if still missing
-  if (!subtotal && items.length > 0) {
-    subtotal = Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+  // If subtotal + GST is around a valid amount (e.g. 76.18 + 3.80 = 79.98 ≈ 80.00),
+  // but grandTotal was read as 280 (because OCR read '₹ 80' as '280'), AUTO-RECONCILE!
+  const computedGrand = Math.round((subtotal + cgst + sgst) * 100) / 100;
+
+  if (computedGrand > 0) {
+    if (!grandTotal || Math.abs(grandTotal - computedGrand) > 5) {
+      // Check if grandTotal has a '2' prefix artifact from '₹' symbol (e.g. 280 vs 80)
+      if (grandTotal > 100 && Math.abs((grandTotal % 100) - Math.round(computedGrand)) <= 3) {
+        grandTotal = Math.round(computedGrand); // Auto-reconcile 280 -> 80!
+      } else {
+        grandTotal = Math.round(computedGrand);
+      }
+    }
   }
 
-  // Grand total last resort
-  if (!grandTotal) grandTotal = subtotal + cgst + sgst + igst;
-
-  // Service charge
   const serviceCharge = getNum(flat, /service\s*charge[^0-9]*([\d,]+\.?\d*)/i);
 
   return {
@@ -236,6 +219,7 @@ function parseRestaurant(raw: string): RestaurantParsed {
     serviceCharge, grandTotal
   };
 }
+
 
 function buildRestaurant(p: RestaurantParsed): BillData {
   const totalGST     = p.cgst + p.sgst + p.igst;
