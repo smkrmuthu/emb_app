@@ -110,17 +110,25 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
         </button>
       </div>
 
-      {/* Unreadable / Low Quality Alert Callout */}
+      {/* Unreadable / Low Quality Alert Callout — All Categories */}
       {isLowQuality && (
         <div className="callout-box warning" style={{ marginBottom: '12px', borderLeftWidth: '4px' }}>
           <div className="callout-head">
             <AlertTriangle size={15} style={{ color: 'var(--warning)' }} />
-            <span style={{ fontWeight: 700 }}>Photo Blurry or Unreadable — Re-take / Re-upload</span>
+            <span style={{ fontWeight: 700 }}>Photo Blurry or Unreadable — Re-take / Re-upload Required</span>
           </div>
           <div className="callout-body" style={{ marginTop: '4px', lineHeight: 1.45 }}>
             {bill.type === 'electricity'
-              ? 'Electricity bills carry NO GST (0%) — charges are calculated using State Electricity Regulatory Commission (SERC) slab rates & subsidies. The photo was too blurry to read the exact units/total clearly. Please re-take a sharp photo in good light or re-upload the original PDF.'
-              : 'The uploaded image was blurry or low-contrast. Please re-take a clear photo in bright light or tap "Edit Amounts" to enter the exact values.'}
+              ? 'Electricity bills carry NO GST (0%) — charges are calculated using State Electricity Regulatory Commission (SERC) slab rates & subsidies. The photo was too blurry to read exact units/total clearly. Please re-take a sharp photo in good light or re-upload the PDF.'
+              : bill.type === 'restaurant'
+              ? 'Restaurant bills are audited for 5% composite GST & illegal mandatory service charges. The receipt photo was blurry or out of focus. Please re-take a sharp photo in good light or re-upload.'
+              : bill.type === 'credit_card'
+              ? 'Credit Card statements are audited for No-Cost EMI true APRs & hidden processing fees. The image/file was unreadable. Please re-take a clear photo or re-upload.'
+              : bill.type === 'grocery'
+              ? 'Grocery receipts are audited for MRP price caps & included GST. The image was unreadable. Please re-take a clear photo or re-upload.'
+              : bill.type === 'hotel'
+              ? 'Hotel folios are audited for 12% vs 18% GST slab rates. The document was unreadable. Please re-take a clear photo or re-upload.'
+              : 'Gas bills (LPG/PNG) are audited for meter readings & subsidy entries. The image was unreadable. Please re-take a clear photo or re-upload.'}
           </div>
           <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
             <button
@@ -137,7 +145,7 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
               onClick={() => setIsEditing(true)}
             >
               <Edit3 size={11} />
-              <span>✏️ Edit Amounts</span>
+              <span>✏️ Edit Amounts Manually</span>
             </button>
           </div>
         </div>

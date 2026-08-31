@@ -148,8 +148,18 @@ export async function scanRealBill(
       ];
     }
   } else {
-    // No OCR text — use best sample for this type
+    // No usable OCR text — use best sample for this type with low-quality warning banner
     parsedBill = { ...getBestMatchingSample(detectedType), id: `scanned-${Date.now()}` };
+    parsedBill.flags = [
+      {
+        id: 'ocr-low-quality',
+        severity: 'warning',
+        title: '⚠ Photo / Document Blurry or Unreadable',
+        description: 'The uploaded file/photo was too blurry or dark to extract text. Please re-take a clear photo in good light or re-upload the original document.',
+        lawCitation: ''
+      },
+      ...parsedBill.flags
+    ];
   }
 
   // Step 4 — Done
