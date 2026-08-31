@@ -8,26 +8,38 @@ export interface ScanProgressCallback {
   subText: string;
 }
 
-/** Maps filename / content keywords to a bill type */
+/**
+ * Maps filename keywords to a bill type.
+ * Uses PREFIX matches to catch common misspellings:
+ *   restaur → restaurant / restaurent / restauran
+ *   electricit → electricity / electrical
+ *   grocer → grocery / groceries
+ */
 export function detectBillTypeFromFilename(fileName: string): BillType | null {
   const name = fileName.toLowerCase();
 
-  if (/electricity|eb|tnpdcl|kseb|tangedco|tsspdcl|tsnpdcl|bescom|msedcl|torrent|wesco|cesu|bill.*unit|unit.*kwh|power|energy/.test(name)) {
+  // Electricity — DISCOM names or power-related keywords
+  if (/electricit|\beb\b|tnpdcl|kseb|tangedco|tsspdcl|tsnpdcl|bescom|msedcl|torrent|wesco|cesu|power.?bill|energy.?bill|unit.*kwh|kwh/.test(name)) {
     return 'electricity';
   }
-  if (/restaurant|cafe|hotel.*food|dining|zomato|swiggy|saravana|bhavan|biryani|dosa|idly|thali|eatery|mess|canteen|bakery|food/.test(name)) {
+  // Restaurant — broad prefix 'restaur' catches restaurant / restaurent / restauran
+  if (/restaur|cafe|dining|zomato|swiggy|saravana|sangeetha|bhavan|biryani|\bdosa\b|idly|thali|eatery|\bmess\b|canteen|bakery|\bfood\b|hotel.*food|receipt.*food/.test(name)) {
     return 'restaurant';
   }
-  if (/credit.?card|hdfc.*card|icici.*card|axis.*card|sbi.*card|kotak.*card|emi|statement|card.*stmt/.test(name)) {
+  // Credit Card & EMI
+  if (/credit.?card|hdfc.*card|icici.*card|axis.*card|sbi.*card|kotak.*card|\bemi\b|card.*stmt|card.*statement/.test(name)) {
     return 'credit_card';
   }
-  if (/grocery|supermarket|dmart|bigbasket|reliance.*fresh|spencer|more.*retail|star.?bazar|vegetables|kirana/.test(name)) {
+  // Grocery / Supermarket
+  if (/grocer|supermarket|dmart|bigbasket|reliance.*fresh|spencer|star.?bazar|kirana|vegetables/.test(name)) {
     return 'grocery';
   }
-  if (/hotel|resort|inn|lodge|taj|marriott|oberoi|itc|radisson|hyatt|hilton|stay|accommodation|folio/.test(name)) {
+  // Hotel Stay
+  if (/\bhotel\b|resort|\binn\b|lodge|taj.*hotel|marriott|oberoi|radisson|hyatt|hilton|folio|accommodation/.test(name)) {
     return 'hotel';
   }
-  if (/gas|lpg|indane|igl|mgl|png|cylinder|bharat.*gas|hp.*gas|piped.*gas|fuel/.test(name)) {
+  // Gas
+  if (/\bgas\b|\blpg\b|indane|\bigl\b|\bmgl\b|\bpng\b|cylinder|bharat.*gas|piped.*gas/.test(name)) {
     return 'gas';
   }
   return null;
@@ -104,6 +116,7 @@ export async function simulateBillScan(
     return getBestMatchingSample(resolvedType);
   }
 
-  // Fallback default
-  return SAMPLE_BILLS[0];
+  // Fallback: return the restaurant sample as a sensible default for unrecognised uploads
+  // (picker should have been shown before reaching here, but just in case)
+  return getBestMatchingSample('restaurant');
 }

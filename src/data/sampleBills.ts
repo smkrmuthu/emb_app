@@ -1,6 +1,69 @@
 import { BillData } from '../types/bill';
 
 export const SAMPLE_BILLS: BillData[] = [
+  // ─── Restaurant: Sangeetha's Desi Mane (from real uploaded bill) ───────────
+  {
+    id: 'sangeethas-desi-mane',
+    type: 'restaurant',
+    state: 'tamil_nadu',
+    billerName: "Sangeetha's Desi Mane – Anna Nagar",
+    categoryLabel: 'Restaurant Bill',
+    billNumber: '83303',
+    billingCycle: 'Dine-in / Take Away',
+    billDate: '05 Jul 2024',
+    dueDate: 'Paid (05 Jul 2024)',
+    totalAmount: 693,
+    summaryPlain: "Standalone restaurant bill from Sangeetha's Desi Mane, Anna Nagar, Chennai. 5% GST (2.5% CGST + 2.5% SGST) correctly applied on food items — this is the right rate for a standalone AC restaurant. No illegal service charge detected on this bill. Grand Total ₹693 is correctly calculated.",
+    gstDetails: {
+      taxableAmount: 660,
+      cgst: 16.50,
+      sgst: 16.50,
+      effectiveRate: 5,
+      isCorrectSlab: true,
+      serviceChargePresent: false,
+      serviceChargeAmount: 0
+    },
+    lineItems: [
+      { id: '1', label: 'Paneer Masala Dosai × 2', amount: 320, rate: 160, units: 2 },
+      { id: '2', label: 'Dosa × 2', amount: 190, rate: 95, units: 2 },
+      { id: '3', label: 'Vendhaya Dosa With Vadacurry × 1', amount: 150, rate: 150, units: 1 },
+      { id: '4', label: 'Sub Total', amount: 660 },
+      { id: '5', label: 'CGST @ 2.5%', amount: 16.50, isSubItem: true, gstRate: 2.5 },
+      { id: '6', label: 'SGST @ 2.5%', amount: 16.50, isSubItem: true, gstRate: 2.5 },
+      { id: '7', label: 'Grand Total', amount: 693 }
+    ],
+    flags: [
+      {
+        id: 'flag-gst-correct',
+        severity: 'good',
+        title: '✓ Correct 5% GST Applied (CGST 2.5% + SGST 2.5%)',
+        description: 'Standalone restaurants (AC or non-AC) must charge 5% composite GST — 2.5% CGST + 2.5% SGST — without Input Tax Credit. This bill applies it exactly right on the food subtotal of ₹660.',
+        lawCitation: 'CBIC Notification No. 46/2017 – Central Tax (Rate)'
+      },
+      {
+        id: 'flag-no-sc',
+        severity: 'good',
+        title: '✓ No Illegal Service Charge Added',
+        description: 'No mandatory service charge was levied on this bill. If any restaurant adds a compulsory service charge in the future, you can legally demand its removal under CCPA 2022 Guidelines.',
+        lawCitation: 'CCPA Guidelines F. No. J-25/4/2020-CCPA (4 July 2022)'
+      },
+      {
+        id: 'flag-gst-math',
+        severity: 'info',
+        title: 'GST Calculation Verified ✓',
+        description: 'Sub Total ₹660.00 × 5% = ₹33.00 GST (₹16.50 CGST + ₹16.50 SGST). Grand Total ₹693.00 = ₹660.00 + ₹33.00. Math is correct.',
+        lawCitation: 'GST Invoice Rules 2017'
+      },
+      {
+        id: 'flag-tip-info',
+        severity: 'info',
+        title: 'Tip / Gratuity is Always Voluntary',
+        description: 'If staff verbally request a tip at checkout, it is completely optional and at your discretion. Restaurants cannot mandate tips — only service charges are governed by CCPA 2022 guidelines.',
+        lawCitation: 'CCPA Guidelines July 2022'
+      }
+    ]
+  },
+
   {
     id: 'tn-eb-612',
     type: 'electricity',

@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 .gemini
+*.jpg
+*.jpeg
+*.png
