@@ -1,6 +1,69 @@
 import { BillData } from '../types/bill';
 
 export const SAMPLE_BILLS: BillData[] = [
+  // ─── Restaurant: Geeraas Restaurant (from real uploaded bill) ─────────────
+  {
+    id: 'geeraas-restaurant',
+    type: 'restaurant',
+    state: 'tamil_nadu',
+    billerName: 'Geeraas Restaurant – Perungudi',
+    categoryLabel: 'Restaurant Bill',
+    billNumber: '57833',
+    billingCycle: 'Dine In (D10)',
+    billDate: '12 Mar 2026',
+    dueDate: 'Paid (12 Mar 2026)',
+    totalAmount: 80,
+    summaryPlain: "Standalone restaurant bill from Geeraas Restaurant, Perungudi, Chennai. 5% GST (2.5% CGST + 2.5% SGST) correctly applied on food items (₹76.18). Grand Total ₹80.00 is math-verified with +0.02 round-off. No illegal service charge.",
+    gstDetails: {
+      taxableAmount: 76.18,
+      cgst: 1.90,
+      sgst: 1.90,
+      effectiveRate: 5,
+      isCorrectSlab: true,
+      serviceChargePresent: false,
+      serviceChargeAmount: 0
+    },
+    lineItems: [
+      { id: '1', label: 'Idly (2 Pcs) × 1', amount: 33.33, rate: 33.33, units: 1 },
+      { id: '2', label: 'Medhu Vadai × 1', amount: 33.33, rate: 33.33, units: 1 },
+      { id: '3', label: 'Gas × 1', amount: 9.52, rate: 9.52, units: 1 },
+      { id: '4', label: 'Sub Total', amount: 76.18 },
+      { id: '5', label: 'CGST @ 2.5%', amount: 1.90, isSubItem: true, gstRate: 2.5 },
+      { id: '6', label: 'SGST @ 2.5%', amount: 1.90, isSubItem: true, gstRate: 2.5 },
+      { id: '7', label: 'Round off', amount: 0.02, isSubItem: true },
+      { id: '8', label: 'Grand Total', amount: 80 }
+    ],
+    flags: [
+      {
+        id: 'flag-gst-correct',
+        severity: 'good',
+        title: '✓ Correct 5% GST Applied (CGST 2.5% + SGST 2.5%)',
+        description: 'Standalone restaurants must charge 5% composite GST — 2.5% CGST + 2.5% SGST — without Input Tax Credit. This bill applies ₹3.80 GST on ₹76.18 subtotal — exactly 5%.',
+        lawCitation: 'CBIC Notification No. 46/2017 – Central Tax (Rate)'
+      },
+      {
+        id: 'flag-no-sc',
+        severity: 'good',
+        title: '✓ No Illegal Service Charge Added',
+        description: 'No compulsory service charge was added to this bill. Consumer rights are respected under CCPA 2022 Guidelines.',
+        lawCitation: 'CCPA Guidelines July 2022'
+      },
+      {
+        id: 'flag-gst-math',
+        severity: 'info',
+        title: '✓ Grand Total ₹80.00 Math Verified',
+        description: 'Sub Total ₹76.18 + CGST ₹1.90 + SGST ₹1.90 + Round-off ₹0.02 = ₹80.00. Arithmetic is 100% correct.',
+        lawCitation: 'GST Invoice Rules 2017'
+      },
+      {
+        id: 'flag-tip-info',
+        severity: 'info',
+        title: 'Tip / Gratuity is Always Voluntary',
+        description: 'Tips are entirely optional. Restaurants cannot mandate tips without your consent.',
+        lawCitation: 'CCPA Guidelines July 2022'
+      }
+    ]
+  },
   // ─── Restaurant: Sangeetha's Desi Mane (from real uploaded bill) ───────────
   {
     id: 'sangeethas-desi-mane',

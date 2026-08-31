@@ -29,7 +29,7 @@ export function detectBillTypeFromFilename(fileName: string): BillType | null {
   const n = fileName.toLowerCase();
   if (/electricit|\beb\b|tnpdcl|kseb|tangedco|tsspdcl|tsnpdcl|bescom|msedcl|kwh/.test(n)) return 'electricity';
   // "restaur" prefix catches: restaurant, restaurent, restauran, restaurateur
-  if (/restaur|cafe|dining|zomato|swiggy|saravana|sangeetha|bhavan|biryani|\bdosa\b|idly|thali|eatery|\bfood\b|canteen/.test(n)) return 'restaurant';
+  if (/restaur|cafe|dining|zomato|swiggy|saravana|sangeetha|geeraas|bhavan|biryani|\bdosa\b|idly|thali|eatery|\bfood\b|canteen/.test(n)) return 'restaurant';
   if (/credit.?card|hdfc.*card|icici.*card|axis.*card|sbi.*card|\bemi\b|card.*stmt/.test(n)) return 'credit_card';
   if (/grocer|supermarket|dmart|bigbasket|reliance.*fresh|kirana/.test(n)) return 'grocery';
   if (/\bhotel\b|resort|\binn\b|lodge|folio|check.?in/.test(n)) return 'hotel';
