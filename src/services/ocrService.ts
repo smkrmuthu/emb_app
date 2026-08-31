@@ -79,7 +79,6 @@ export async function scanRealBill(
   onProgress({ stepIndex: 1, totalSteps: 4, statusText: 'Scanning bill with OCR engine…', subText: `Reading "${fileName}"` });
 
   let ocrText = '';
-  let ocrConfidence = 0;
 
   try {
     const ocr = await extractTextFromImage(imageDataUrl, (status, pct) => {
@@ -90,7 +89,6 @@ export async function scanRealBill(
       });
     });
     ocrText = ocr.text;
-    ocrConfidence = ocr.confidence;
   } catch (err) {
     console.warn('OCR failed, using filename detection:', err);
   }
@@ -125,22 +123,28 @@ export async function scanRealBill(
   await delay(500);
 
   let parsedBill: BillData;
-  if (ocrText && ocrText.trim().length > 50 && ocrConfidence > 30) {
-    // Good OCR — use real parsed data
+  // Always attempt real parsing as long as we have meaningful text.
+  // Low OCR confidence often still gives usable text for bill parsing.
+  if (ocrText && ocrText.trim().length > 20) {
     parsedBill = parseBillFromOCR(ocrText, detectedType);
+
+    // If parsing extracted nothing meaningful, fall back to best sample with warning
+    if (parsedBill.totalAmount === 0 && parsedBill.lineItems.length <= 1) {
+      parsedBill = { ...getBestMatchingSample(detectedType), id: `scanned-${Date.now()}` };
+      parsedBill.flags = [
+        {
+          id: 'ocr-low-quality',
+          severity: 'warning',
+          title: '⚠ Image Quality Too Low for Full Extraction',
+          description: 'The uploaded image was not clear enough to reliably extract line items. Try a higher-resolution photo in good lighting. Showing standard breakdown for this bill type instead.',
+          lawCitation: ''
+        },
+        ...parsedBill.flags
+      ];
+    }
   } else {
-    // Poor OCR quality — use sample as template
+    // No OCR text — use best sample for this type
     parsedBill = { ...getBestMatchingSample(detectedType), id: `scanned-${Date.now()}` };
-    parsedBill.flags = [
-      {
-        id: 'ocr-low-quality',
-        severity: 'warning',
-        title: '⚠ Image Quality Too Low for Full Scan',
-        description: 'The uploaded image was not clear enough for full text extraction. Try uploading a higher-resolution photo in good lighting. Showing the standard breakdown for this bill type.',
-        lawCitation: ''
-      },
-      ...parsedBill.flags
-    ];
   }
 
   // Step 4 — Done
