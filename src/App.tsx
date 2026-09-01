@@ -220,6 +220,7 @@ export const App: React.FC = () => {
         type="file"
         ref={globalFileInputRef}
         onChange={handleGlobalFileChange}
+        onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
         accept="image/*,application/pdf"
         capture="environment"
         style={{ display: 'none' }}

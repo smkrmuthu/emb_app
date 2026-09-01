@@ -128,10 +128,60 @@ export const SAMPLE_BILLS: BillData[] = [
   },
 
   {
-    id: 'dinesh-tangedco-invoice',
+    id: 'dinesh-tangedco-dec2024',
     type: 'electricity',
     state: 'tamil_nadu',
-    billerName: 'TNPDCL — TANGEDCO (DINESH.R)',
+    billerName: 'TNPDCL (Dec 2024) — DINESH.R',
+    categoryLabel: 'Electricity Bill',
+    billNumber: 'Conn: 09-315-363-699',
+    billingCycle: 'Month of December 2024',
+    billDate: '21 Dec 2024',
+    dueDate: '10/01/2025',
+    totalAmount: 1307,
+    summaryPlain: 'TANGEDCO Tax Invoice for DINESH.R (SITHALAPAKKAM). 421 units consumed. Energy charges ₹2,055.45 less Govt Subsidy -₹748.15 and Round-off -₹0.30 = Net Payable ₹1,307.00. Consumption is under the 500-unit high penalty threshold.',
+    ebDetails: {
+      state: 'tamil_nadu',
+      discomName: 'TNPDCL — TANGEDCO (SITHALAPAKKAM)',
+      meterNumber: '1026753',
+      consumedUnits: 421,
+      fixedCharges: 0,
+      electricityDuty: 0,
+      fuelSurcharge: 0,
+      slabBreakdown: [
+        { slabRange: '0–100 units (Govt Subsidy)', unitsCharged: 100, ratePerUnit: 0, totalCost: 0, isFree: true, colorHex: '#2E6E4E' },
+        { slabRange: '101–200 units @ ₹2.35', unitsCharged: 100, ratePerUnit: 2.35, totalCost: 235, isFree: false, colorHex: '#429367' },
+        { slabRange: '201–400 units @ ₹4.95', unitsCharged: 200, ratePerUnit: 4.95, totalCost: 990, isFree: false, colorHex: '#A9812E' },
+        { slabRange: '401–421 units @ ₹6.80 (21 units)', unitsCharged: 21, ratePerUnit: 6.80, totalCost: 142.80, isFree: false, colorHex: '#D97706' }
+      ]
+    },
+    lineItems: [
+      { id: '1', label: 'Energy Charges (421.0 units consumed)', amount: 2055.45 },
+      { id: '2', label: 'Govt Subsidy Exemption', amount: -748.15 },
+      { id: '3', label: 'Round off', amount: -0.30, isSubItem: true },
+      { id: '4', label: 'Net Amount Payable', amount: 1307 }
+    ],
+    flags: [
+      {
+        id: 'flag-normal-slab',
+        severity: 'good',
+        title: '✓ Consumption (421 Units) Within Subsidised Slabs',
+        description: 'Total consumption of 421 units is below the 500-unit high penalty threshold. First 100 units free by TN Govt subsidy.',
+        lawCitation: 'TN Govt Energy Dept G.O. Ms. No. 34'
+      },
+      {
+        id: 'flag-govt-subsidy',
+        severity: 'info',
+        title: '✓ TN Govt Subsidy (-₹748.15) Applied',
+        description: 'First 100 units provided at ₹0 cost + tariff subsidies as mandated by the Tamil Nadu State Electricity Subsidy scheme.',
+        lawCitation: 'TN Govt Energy Dept G.O. Ms. No. 34'
+      }
+    ]
+  },
+  {
+    id: 'dinesh-tangedco-jun2026',
+    type: 'electricity',
+    state: 'tamil_nadu',
+    billerName: 'TNPDCL (June 2026) — DINESH.R',
     categoryLabel: 'Electricity Bill',
     billNumber: 'Conn: 09-315-363-699',
     billingCycle: 'Month of June 2026',

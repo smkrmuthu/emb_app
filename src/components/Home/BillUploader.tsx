@@ -66,6 +66,7 @@ export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) =>
         type="file"
         ref={fileInputRef}
         onChange={handleInputChange}
+        onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
         accept="image/*,application/pdf"
         style={{ display: 'none' }}
       />
