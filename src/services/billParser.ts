@@ -385,18 +385,56 @@ function buildGrocery(raw: string): BillData {
   const flat  = raw.replace(/\n/g, ' ');
   const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
   const storeName = lines.find(l => l.length > 4 && !/^\d/.test(l)) ?? 'Grocery Store';
-  const grandTotal = getNum(flat, /(?:grand\s*total|net\s*amount|bill\s*total|total)\s*[₹₨]?\s*([\d,]+\.?\d*)/i);
   const discount   = getNum(flat, /discount\s*[₹₨]?\s*-?\s*([\d,]+\.?\d*)/i);
+  const roundOff   = getNum(flat, /round\s*off\s*[₹₨]?\s*(-?[\d,]+\.?\d*)/i);
+
+  // Lines that are structural/metadata noise, never a purchased item
+  const isNoiseLine = (label: string) =>
+    /total|sub\s*total|tax|gst|cgst|sgst|discount|round\s*off|no\.?\s*of\s*items|t\s*wt|weight|operator|bill\s*#|mc\s*#|ph[:.]|item\s*name|wt\/qty|price|amt\b/i.test(label);
 
   const items: LineItem[] = [];
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^(.+?)\s{2,}([\d,]+\.?\d*)\s*$/);
-    if (m && !/total|tax|gst|cgst|sgst|discount/i.test(m[1])) {
+    if (m && !isNoiseLine(m[1]) && (m[1].match(/[A-Za-z]/g)?.length ?? 0) >= 2) {
       const amt = parseFloat(m[2].replace(',', ''));
-      if (amt > 0 && amt < grandTotal * 0.95) {
-        items.push({ id: `g${i}`, label: m[1].trim(), amount: amt });
-      }
+      if (amt > 0) items.push({ id: `g${i}`, label: m[1].trim(), amount: amt });
     }
+  }
+  const itemsSum = Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+
+  // 1. Explicit "Grand Total" / "Net Amount" / "Bill Total" label, if the receipt has one
+  let grandTotal = getNum(flat, /(?:grand\s*total|net\s*amount|bill\s*total)\s*[₹₨]?\s*([\d,]+\.?\d*)/i);
+
+  // 2. Many compact POS receipts mark only the final payable amount with a ₹/₨ symbol and
+  //    no "Total" label at all — take the last such standalone amount, skipping weight/item-count lines.
+  if (!grandTotal) {
+    const rupeeLines = lines.filter(l => /[₹₨]\s*[\d,]+\.?\d*/.test(l) && !isNoiseLine(l));
+    if (rupeeLines.length) grandTotal = lastNum(rupeeLines[rupeeLines.length - 1]);
+  }
+
+  // 3. Fall back to items + round-off if still nothing found
+  const computedTotal = Math.round((itemsSum + roundOff) * 100) / 100;
+  if (!grandTotal && computedTotal > 0) {
+    grandTotal = computedTotal;
+  } else if (grandTotal && computedTotal > 0 && Math.abs(grandTotal - computedTotal) > 3) {
+    // Correct the same '₹' → stray-leading-digit OCR artifact seen on restaurant bills
+    const strippedLeadingDigit = parseFloat(grandTotal.toString().replace(/^\d/, ''));
+    if (Math.abs(strippedLeadingDigit - computedTotal) <= 3) {
+      grandTotal = Math.round(computedTotal);
+    }
+    // Otherwise trust the amount actually printed/read on the receipt.
+  }
+
+  const flags: BillFlag[] = [
+    { id: 'mrp', severity: 'info', title: 'Check MRP on Each Item', description: 'Retailers cannot charge above the Maximum Retail Price printed on the package.', lawCitation: 'Legal Metrology Act 2009' },
+    { id: 'gst-incl', severity: 'info', title: 'GST Is Included in MRP', description: 'For packaged goods, GST is already included in the MRP. A separate GST line on top of MRP is illegal.', lawCitation: 'GST Council – Consumer Pack Exemption' }
+  ];
+
+  if (!grandTotal) {
+    flags.unshift({ id: 'ocr-low-quality', severity: 'warning',
+      title: '⚠ Bill Total Unclear — Retake Required',
+      description: 'We could not reliably read the total amount on this receipt. Please retake a sharper photo in good light or re-upload the original.',
+      lawCitation: '' });
   }
 
   return {
@@ -406,14 +444,12 @@ function buildGrocery(raw: string): BillData {
     billingCycle: 'Purchase',
     billDate: getStr(raw, /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/) ?? todayStr(),
     dueDate: 'Paid', totalAmount: grandTotal,
-    summaryPlain: `${items.length} items extracted. Discount: ₹${discount.toFixed(2)}.`,
+    summaryPlain: `${items.length} item(s) extracted.${discount > 0 ? ` Discount: ₹${discount.toFixed(2)}.` : ''}`,
     lineItems: [...items,
       ...(discount > 0 ? [{ id: 'disc', label: 'Discount', amount: -discount }] : []),
+      ...(roundOff !== 0 ? [{ id: 'round', label: 'Round off', amount: roundOff, isSubItem: true }] : []),
       { id: 'total', label: 'Total', amount: grandTotal }],
-    flags: [
-      { id: 'mrp', severity: 'info', title: 'Check MRP on Each Item', description: 'Retailers cannot charge above the Maximum Retail Price printed on the package.', lawCitation: 'Legal Metrology Act 2009' },
-      { id: 'gst-incl', severity: 'info', title: 'GST Is Included in MRP', description: 'For packaged goods, GST is already included in the MRP. A separate GST line on top of MRP is illegal.', lawCitation: 'GST Council – Consumer Pack Exemption' }
-    ]
+    flags
   };
 }
 
