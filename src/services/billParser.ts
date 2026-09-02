@@ -196,40 +196,23 @@ function parseRestaurant(raw: string): RestaurantParsed {
     subtotal = itemsSum;
   }
 
-  // Specific check for Geeraas Restaurant receipt
-  if (/geeraas/i.test(flat)) {
-    return {
-      restaurantName: 'Geeraas Restaurant',
-      gstin: '33AQKPS91902Z9',
-      billNumber: '57833',
-      billDate: '12/03/26',
-      items: [
-        { label: 'Idly ( 2 Pcs )', qty: 1, rate: 33.33, amount: 33.33 },
-        { label: 'Medhu Vadai', qty: 1, rate: 33.33, amount: 33.33 },
-        { label: 'Gas', qty: 1, rate: 9.52, amount: 9.52 }
-      ],
-      subtotal: 76.18,
-      cgst: 1.90, cgstRate: 2.5,
-      sgst: 1.90, sgstRate: 2.5,
-      igst: 0,
-      serviceCharge: 0,
-      grandTotal: 80.00
-    };
-  }
-
-  // If subtotal + GST is around a valid amount (e.g. 76.18 + 3.80 = 79.98 ≈ 80.00),
-  // but grandTotal was read as 280 (because OCR read '₹ 80' as '280'), AUTO-RECONCILE!
+  // Reconcile the printed Grand Total against Sub Total + GST.
+  // The Grand Total is usually printed larger/bolder than the item table and is the
+  // more reliable OCR read, so it takes priority — we only override it when it fits a
+  // known OCR-garbling pattern (e.g. '₹80.00' misread as '280.00', the '₹' glyph
+  // getting read as a stray leading digit). Otherwise, if it's missing entirely, we
+  // fall back to the computed Sub Total + GST.
   const computedGrand = Math.round((subtotal + cgst + sgst) * 100) / 100;
 
-  if (computedGrand > 0) {
-    if (!grandTotal || Math.abs(grandTotal - computedGrand) > 5) {
-      // Check if grandTotal has a '2' prefix artifact from '₹' symbol (e.g. 280 vs 80)
-      if (grandTotal > 100 && Math.abs((grandTotal % 100) - Math.round(computedGrand)) <= 3) {
-        grandTotal = Math.round(computedGrand); // Auto-reconcile 280 -> 80!
-      } else {
-        grandTotal = Math.round(computedGrand);
-      }
+  if (grandTotal > 0 && computedGrand > 0 && Math.abs(grandTotal - computedGrand) > 3) {
+    // Stray leading digit before the true amount (e.g. 280.00 vs 80.00, or 2280 vs 280)
+    const strippedLeadingDigit = parseFloat(grandTotal.toString().replace(/^\d/, ''));
+    if (Math.abs(strippedLeadingDigit - computedGrand) <= 3) {
+      grandTotal = Math.round(computedGrand);
     }
+    // Otherwise trust the printed Grand Total as read — do not silently overwrite it.
+  } else if (!grandTotal && computedGrand > 0) {
+    grandTotal = computedGrand;
   }
 
   const serviceCharge = getNum(flat, /service\s*charge[^0-9]*([\d,]+\.?\d*)/i);
@@ -244,14 +227,36 @@ function parseRestaurant(raw: string): RestaurantParsed {
 
 function buildRestaurant(p: RestaurantParsed): BillData {
   const totalGST     = p.cgst + p.sgst + p.igst;
-  const effectiveRate = p.subtotal > 0
-    ? Math.round((totalGST / p.subtotal) * 1000) / 10  // 1 decimal
-    : 0;
   const expectedTotal = p.subtotal + totalGST + p.serviceCharge;
-  const totalOk       = p.grandTotal === 0 || approxEq(expectedTotal, p.grandTotal, 3);
-  const gstOk         = Math.abs(effectiveRate - 5) < 0.6;
+
+  // The item table (and the Sub Total derived from it) is the least reliable part of
+  // the OCR read — a blurry photo often garbles it while the bolder Grand Total still
+  // reads fine. If the item-derived Sub Total is wildly inconsistent with the (trusted)
+  // Grand Total, treat the item breakdown as unreadable rather than showing bogus
+  // line items or GST/discrepancy flags computed from them.
+  const itemsReliable = p.items.length > 0 && p.subtotal > 0 && (
+    p.grandTotal === 0 || Math.abs(expectedTotal - p.grandTotal) <= Math.max(15, p.grandTotal * 0.5)
+  );
+
+  const reliableSubtotal = itemsReliable ? p.subtotal : 0;
+  const reliableItems    = itemsReliable ? p.items : [];
+
+  const effectiveRate = reliableSubtotal > 0
+    ? Math.round((totalGST / reliableSubtotal) * 1000) / 10  // 1 decimal
+    : 0;
+  const totalOk = p.grandTotal === 0 || approxEq(reliableSubtotal + totalGST + p.serviceCharge, p.grandTotal, 3);
+  const gstOk   = Math.abs(effectiveRate - 5) < 0.6;
 
   const flags: BillFlag[] = [];
+
+  // Item table unreadable/unreliable even though a total was found — surface a retake
+  // prompt rather than presenting an unverified line-by-line audit as if it were reliable.
+  if (!itemsReliable && p.grandTotal > 0) {
+    flags.push({ id: 'ocr-low-quality', severity: 'warning',
+      title: '⚠ Item Details Unclear — Retake for Full Breakdown',
+      description: 'We could read the bill total but not the individual item lines clearly. For an accurate line-by-line audit, please retake a sharper photo in good light or re-upload the original.',
+      lawCitation: '' });
+  }
 
   // GST
   if (effectiveRate > 0) {
@@ -263,10 +268,10 @@ function buildRestaurant(p: RestaurantParsed): BillData {
     } else {
       flags.push({ id: 'gst-wrong', severity: 'danger',
         title: `⚠ GST Rate ${effectiveRate}% – Expected 5% for Standalone Restaurants`,
-        description: `You were charged ${effectiveRate}% GST but standalone restaurants are capped at 5%. Excess: ₹${Math.abs(totalGST - p.subtotal * 0.05).toFixed(2)}.`,
+        description: `You were charged ${effectiveRate}% GST but standalone restaurants are capped at 5%. Excess: ₹${Math.abs(totalGST - reliableSubtotal * 0.05).toFixed(2)}.`,
         lawCitation: 'CBIC Notification No. 46/2017',
         actionable: true, disputeType: 'service_charge',
-        savingsPotential: parseFloat(Math.abs(totalGST - p.subtotal * 0.05).toFixed(2)) });
+        savingsPotential: parseFloat(Math.abs(totalGST - reliableSubtotal * 0.05).toFixed(2)) });
     }
   }
 
@@ -285,19 +290,20 @@ function buildRestaurant(p: RestaurantParsed): BillData {
       lawCitation: 'CCPA Guidelines July 2022' });
   }
 
-  // Total verification
-  if (p.grandTotal > 0) {
+  // Total verification — only meaningful once we trust the item breakdown
+  if (p.grandTotal > 0 && itemsReliable) {
+    const reliableExpectedTotal = reliableSubtotal + totalGST + p.serviceCharge;
     if (!totalOk) {
-      const diff = Math.abs(expectedTotal - p.grandTotal);
+      const diff = Math.abs(reliableExpectedTotal - p.grandTotal);
       flags.push({ id: 'total-wrong', severity: 'danger',
         title: `⚠ Grand Total Discrepancy — ₹${diff.toFixed(2)} Extra`,
-        description: `Items ₹${p.subtotal.toFixed(2)} + GST ₹${totalGST.toFixed(2)} = ₹${expectedTotal.toFixed(2)}, but bill shows ₹${p.grandTotal.toFixed(2)}.`,
+        description: `Items ₹${reliableSubtotal.toFixed(2)} + GST ₹${totalGST.toFixed(2)} = ₹${reliableExpectedTotal.toFixed(2)}, but bill shows ₹${p.grandTotal.toFixed(2)}.`,
         lawCitation: 'Consumer Protection Act 2019',
         savingsPotential: diff });
     } else {
       flags.push({ id: 'total-ok', severity: 'info',
         title: `✓ Grand Total ₹${p.grandTotal.toFixed(2)} Verified`,
-        description: `₹${p.subtotal.toFixed(2)} + ₹${totalGST.toFixed(2)} GST = ₹${expectedTotal.toFixed(2)}. Arithmetic is correct.`,
+        description: `₹${reliableSubtotal.toFixed(2)} + ₹${totalGST.toFixed(2)} GST = ₹${reliableExpectedTotal.toFixed(2)}. Arithmetic is correct.`,
         lawCitation: 'GST Invoice Rules 2017' });
     }
   }
@@ -308,11 +314,11 @@ function buildRestaurant(p: RestaurantParsed): BillData {
     lawCitation: 'CCPA Guidelines July 2022' });
 
   const lineItems: LineItem[] = [
-    ...p.items.map((it, i) => ({
+    ...reliableItems.map((it, i) => ({
       id: `it-${i}`, label: `${it.label} × ${it.qty}`,
       amount: it.amount, rate: it.rate, units: it.qty
     })),
-    { id: 'sub', label: 'Sub Total', amount: p.subtotal },
+    ...(itemsReliable ? [{ id: 'sub', label: 'Sub Total', amount: reliableSubtotal }] : []),
     ...(p.cgst > 0 ? [{ id: 'cgst', label: `CGST @ ${p.cgstRate}%`, amount: p.cgst, isSubItem: true, gstRate: p.cgstRate }] : []),
     ...(p.sgst > 0 ? [{ id: 'sgst', label: `SGST @ ${p.sgstRate}%`, amount: p.sgst, isSubItem: true, gstRate: p.sgstRate }] : []),
     ...(p.igst > 0 ? [{ id: 'igst', label: 'IGST', amount: p.igst, isSubItem: true }] : []),
@@ -321,12 +327,12 @@ function buildRestaurant(p: RestaurantParsed): BillData {
   ];
 
   const gstDetails: GSTDetails = {
-    taxableAmount: p.subtotal, cgst: p.cgst, sgst: p.sgst, igst: p.igst,
+    taxableAmount: reliableSubtotal, cgst: p.cgst, sgst: p.sgst, igst: p.igst,
     effectiveRate, isCorrectSlab: gstOk,
     serviceChargePresent: p.serviceCharge > 0, serviceChargeAmount: p.serviceCharge
   };
 
-  const totalAmt = p.grandTotal > 0 ? p.grandTotal : p.subtotal + totalGST;
+  const totalAmt = p.grandTotal > 0 ? p.grandTotal : reliableSubtotal + totalGST;
 
   return {
     id: `scanned-${Date.now()}`,
@@ -338,7 +344,7 @@ function buildRestaurant(p: RestaurantParsed): BillData {
     billDate: p.billDate ?? todayStr(),
     dueDate: 'Paid',
     totalAmount: totalAmt,
-    summaryPlain: `${p.items.length > 0 ? `${p.items.length} item(s) read from your receipt. ` : ''}${gstOk ? `Correct 5% GST applied (₹${totalGST.toFixed(2)}). ` : effectiveRate > 0 ? `GST rate anomaly detected. ` : ''}${p.serviceCharge > 0 ? `ALERT: Illegal service charge ₹${p.serviceCharge.toFixed(2)} found!` : 'No service charge — rights respected.'}`,
+    summaryPlain: `${itemsReliable ? `${reliableItems.length} item(s) read from your receipt. ` : ''}${gstOk && itemsReliable ? `Correct 5% GST applied (₹${totalGST.toFixed(2)}). ` : effectiveRate > 0 && itemsReliable ? `GST rate anomaly detected. ` : ''}${p.serviceCharge > 0 ? `ALERT: Illegal service charge ₹${p.serviceCharge.toFixed(2)} found!` : 'No service charge — rights respected.'}`,
     lineItems, flags, gstDetails
   };
 }

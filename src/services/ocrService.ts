@@ -77,6 +77,7 @@ export async function scanRealBill(
 ): Promise<ScanResult> {
 
   let ocrText = pdfText || '';
+  let ocrConfidence: number | undefined;
 
   // Step 1 — OCR (only if pdfText not already extracted)
   if (!ocrText && imageDataUrl) {
@@ -90,6 +91,7 @@ export async function scanRealBill(
         });
       });
       ocrText = ocr.text;
+      ocrConfidence = ocr.confidence;
     } catch (err) {
       console.warn('OCR failed, using filename detection:', err);
     }
@@ -129,8 +131,12 @@ export async function scanRealBill(
 
   let parsedBill: BillData;
   // Always attempt real parsing as long as we have meaningful text.
-  // Low OCR confidence often still gives usable text for bill parsing.
-  if (ocrText && ocrText.trim().length > 20) {
+  // Low OCR confidence often still gives usable text for bill parsing —
+  // only treat it as unreadable below a very low bar (empirically, legible
+  // thermal-paper receipts still often score ~60-70% due to print texture).
+  const veryLowConfidence = ocrConfidence !== undefined && ocrConfidence < 25;
+
+  if (ocrText && ocrText.trim().length > 20 && !veryLowConfidence) {
     parsedBill = parseBillFromOCR(ocrText, detectedType);
 
     // If parsing extracted totalAmount = 0, fall back to best sample with low-quality warning banner
