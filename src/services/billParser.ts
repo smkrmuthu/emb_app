@@ -385,8 +385,8 @@ function buildGrocery(raw: string): BillData {
   const flat  = raw.replace(/\n/g, ' ');
   const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
   const storeName = lines.find(l => l.length > 4 && !/^\d/.test(l)) ?? 'Grocery Store';
-  const discount   = getNum(flat, /discount\s*[₹₨]?\s*-?\s*([\d,]+\.?\d*)/i);
-  const roundOff   = getNum(flat, /round\s*off\s*[₹₨]?\s*(-?[\d,]+\.?\d*)/i);
+  const discount   = getNum(flat, /discount\s*[:\s]*[₹₨]?\s*-?\s*([\d,]+\.?\d*)/i);
+  const roundOff   = getNum(flat, /round\s*off\s*[:\s]*[₹₨]?\s*(-?[\d,]+\.?\d*)/i);
 
   // Lines that are structural/metadata noise, never a purchased item
   const isNoiseLine = (label: string) =>
@@ -400,10 +400,32 @@ function buildGrocery(raw: string): BillData {
       if (amt > 0) items.push({ id: `g${i}`, label: m[1].trim(), amount: amt });
     }
   }
+
+  // Some tax-invoice-style POS receipts (HSN code tables) split each item across two
+  // lines: "1.) Item Name" followed by "HSN MRP OurPrice Qty Value" — try that shape
+  // when the single-line strategy above found nothing.
+  if (items.length === 0) {
+    for (let i = 0; i < lines.length - 1; i++) {
+      const nameMatch = lines[i].match(/^\d+[.)]+\s*(.+)/);
+      if (!nameMatch) continue;
+      const cols = nums(lines[i + 1]);
+      // Expect HSN, MRP, OurPrice, Qty, Value — the Value (last column) is the amount
+      if (cols.length >= 4) {
+        const amt = cols[cols.length - 1];
+        const label = nameMatch[1].trim();
+        if (label.length >= 2 && amt > 0) {
+          items.push({ id: `g${i}`, label, amount: amt });
+        }
+      }
+    }
+  }
+
   const itemsSum = Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
 
-  // 1. Explicit "Grand Total" / "Net Amount" / "Bill Total" label, if the receipt has one
-  let grandTotal = getNum(flat, /(?:grand\s*total|net\s*amount|bill\s*total)\s*[₹₨]?\s*([\d,]+\.?\d*)/i);
+  // 1. Explicit total label, if the receipt has one — covers "Grand Total"/"Net Amount"/
+  //    "Bill Total"/"Net Payable"/"Amount Payable"/"PAY:" (tax-invoice style), and both
+  //    ₹/₨ symbols and a plain "Rs." prefix.
+  let grandTotal = getNum(flat, /(?:grand\s*total|net\s*amount|bill\s*total|net\s*payable|amount\s*payable|\bpay)\s*[:\s]*[₹₨]?\s*(?:rs\.?)?\s*([\d,]+\.?\d*)/i);
 
   // 2. Many compact POS receipts mark only the final payable amount with a ₹/₨ symbol and
   //    no "Total" label at all — take the last such standalone amount, skipping weight/item-count lines.
