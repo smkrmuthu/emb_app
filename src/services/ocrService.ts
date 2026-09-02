@@ -42,8 +42,8 @@ export function detectBillTypeFromFilename(fileName: string): BillType | null {
  */
 function detectBillTypeFromText(text: string): BillType | null {
   const t = text.toLowerCase();
-  if (/tangedco|tnpdcl|kseb|tsspdcl|bescom|electricity|units\s*consumed|kwh|tariff\s*slab|current\s*consumption|tax\s*invoice|service\s*connection|minnagam|tnebenet/.test(t)) return 'electricity';
-  if (/cgst|sgst|restaurant|cafe|dining|food\s*bill|take\s*away|takeaway|menu|dosa|biryani|thali/.test(t)) return 'restaurant';
+  if (/geeraas|restaurant|restaurent|saravana|sangeetha|cafe|dining|food\s*bill|take\s*away|takeaway|menu|dosa|idly|vadai|biryani|thali|cgst|sgst/.test(t)) return 'restaurant';
+  if (/tangedco|tnpdcl|kseb|tsspdcl|bescom|electricity|units\s*consumed|kwh|tariff\s*slab|current\s*consumption|service\s*connection|minnagam|tnebenet/.test(t)) return 'electricity';
   if (/credit\s*card|statement|minimum.*due|total.*due|credit\s*limit|outstanding\s*balance/.test(t)) return 'credit_card';
   if (/grocery|supermarket|dmart|bigbasket|mrt|mrp|net.*amount.*items/.test(t)) return 'grocery';
   if (/hotel|resort|folio|room\s*(?:charge|tariff|rate)|check.?in|check.?out/.test(t)) return 'hotel';
