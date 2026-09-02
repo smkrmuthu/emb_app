@@ -56,6 +56,8 @@ interface RestaurantParsed {
   igst: number;
   serviceCharge: number;
   grandTotal: number;
+  /** Whether Grand Total was actually read off the receipt, vs. backfilled from Sub Total + GST */
+  grandTotalFromOCR: boolean;
 }
 
 function parseRestaurant(raw: string): RestaurantParsed {
@@ -147,6 +149,10 @@ function parseRestaurant(raw: string): RestaurantParsed {
 
   for (const line of tableLines) {
     if (/^(no|qty|price|amount|sl|sr|item)\.?$/i.test(line)) continue;
+    // Tax/rate rows (e.g. "CGST@2.5 2.5%", garbled OCR variants like "COST@2.525%")
+    // always carry a '%' or '@' — genuine food items never do. Skip them outright so
+    // they can't get miscounted as a line item.
+    if (/[%@]/.test(line)) continue;
 
     const lineNums = nums(line);
     if (lineNums.length === 0) continue;
@@ -154,6 +160,16 @@ function parseRestaurant(raw: string): RestaurantParsed {
     // Remove leading line number if present e.g. "1 Idly 33.33 33.33"
     let cleanLine = line.replace(/^\d+\s+/, '');
     const cleanNums = nums(cleanLine);
+
+    const cleanLabel = (raw: string) => raw
+      .replace(/[()]/g, '')
+      .replace(/^[^A-Za-z0-9]+/, '')   // strip leading OCR noise: ~ | " ` etc.
+      .replace(/[^A-Za-z0-9\s]+$/, '') // strip trailing noise
+      .trim();
+
+    // A genuine item label needs at least 2 real letters — rejects noise like "I", "|", "95"
+    const looksLikeItem = (label: string) => (label.match(/[A-Za-z]/g)?.length ?? 0) >= 2
+      && !/total|qty|sub|cgst|sgst|cost@/i.test(label);
 
     if (cleanNums.length >= 2) {
       // Case A: "Idly ( 2 Pcs) 1 33.33 33.33" -> qty=1, rate=33.33, amt=33.33
@@ -163,9 +179,9 @@ function parseRestaurant(raw: string): RestaurantParsed {
       const qty = cleanNums.length >= 3 ? cleanNums[cleanNums.length - 3] : 1;
 
       // Label is text before the first price number
-      const label = cleanLine.split(/\s+\d+[.,]?\d*/)[0].replace(/[()]/g, '').trim();
+      const label = cleanLabel(cleanLine.split(/\s+\d+[.,]?\d*/)[0]);
 
-      if (label.length >= 2 && amt > 0 && amt < 10000 && !/total|qty|sub|cgst|sgst/i.test(label)) {
+      if (looksLikeItem(label) && amt > 0 && amt < 10000) {
         items.push({
           label: label || 'Food Item',
           qty: qty > 0 && qty <= 50 ? qty : 1,
@@ -176,9 +192,9 @@ function parseRestaurant(raw: string): RestaurantParsed {
     } else if (cleanNums.length === 1) {
       // Single price line e.g. "Gas 9.52" or "Filter Coffee 40"
       const amt = cleanNums[0];
-      const label = cleanLine.replace(/\s+\d+[.,]?\d*/, '').trim();
+      const label = cleanLabel(cleanLine.replace(/\s+\d+[.,]?\d*/, ''));
 
-      if (label.length >= 2 && amt > 0 && amt < 10000 && !/total|qty|sub|cgst|sgst/i.test(label)) {
+      if (looksLikeItem(label) && amt > 0 && amt < 10000) {
         items.push({
           label: label || 'Item',
           qty: 1,
@@ -203,6 +219,7 @@ function parseRestaurant(raw: string): RestaurantParsed {
   // getting read as a stray leading digit). Otherwise, if it's missing entirely, we
   // fall back to the computed Sub Total + GST.
   const computedGrand = Math.round((subtotal + cgst + sgst) * 100) / 100;
+  const grandTotalFromOCR = grandTotal > 0;
 
   if (grandTotal > 0 && computedGrand > 0 && Math.abs(grandTotal - computedGrand) > 3) {
     // Stray leading digit before the true amount (e.g. 280.00 vs 80.00, or 2280 vs 280)
@@ -220,7 +237,7 @@ function parseRestaurant(raw: string): RestaurantParsed {
   return {
     restaurantName, gstin, billNumber, billDate,
     items, subtotal, cgst, cgstRate, sgst, sgstRate, igst,
-    serviceCharge, grandTotal
+    serviceCharge, grandTotal, grandTotalFromOCR
   };
 }
 
@@ -234,9 +251,22 @@ function buildRestaurant(p: RestaurantParsed): BillData {
   // reads fine. If the item-derived Sub Total is wildly inconsistent with the (trusted)
   // Grand Total, treat the item breakdown as unreadable rather than showing bogus
   // line items or GST/discrepancy flags computed from them.
+  //
+  // When the Grand Total itself was never independently read off the receipt (only
+  // backfilled from Sub Total + GST), there's nothing to cross-check the items against
+  // — in that case, require CGST *and* SGST to have been independently detected as a
+  // substitute corroboration (every standalone-restaurant bill carries both by law).
   const itemsReliable = p.items.length > 0 && p.subtotal > 0 && (
-    p.grandTotal === 0 || Math.abs(expectedTotal - p.grandTotal) <= Math.max(15, p.grandTotal * 0.5)
+    p.grandTotalFromOCR
+      ? Math.abs(expectedTotal - p.grandTotal) <= Math.max(15, p.grandTotal * 0.5)
+      : p.cgst > 0 && p.sgst > 0
   );
+
+  // Only surface a total when we actually have grounds to trust it: either it was
+  // read directly off the receipt, or it was backfilled from a Sub Total + GST we've
+  // corroborated as reliable. Otherwise, show nothing rather than a number computed
+  // from garbled items — the caller falls back to a clear "please retake" state.
+  const trustedGrandTotal = (p.grandTotalFromOCR || itemsReliable) ? p.grandTotal : 0;
 
   const reliableSubtotal = itemsReliable ? p.subtotal : 0;
   const reliableItems    = itemsReliable ? p.items : [];
@@ -251,7 +281,7 @@ function buildRestaurant(p: RestaurantParsed): BillData {
 
   // Item table unreadable/unreliable even though a total was found — surface a retake
   // prompt rather than presenting an unverified line-by-line audit as if it were reliable.
-  if (!itemsReliable && p.grandTotal > 0) {
+  if (!itemsReliable && p.grandTotalFromOCR) {
     flags.push({ id: 'ocr-low-quality', severity: 'warning',
       title: '⚠ Item Details Unclear — Retake for Full Breakdown',
       description: 'We could read the bill total but not the individual item lines clearly. For an accurate line-by-line audit, please retake a sharper photo in good light or re-upload the original.',
@@ -323,7 +353,7 @@ function buildRestaurant(p: RestaurantParsed): BillData {
     ...(p.sgst > 0 ? [{ id: 'sgst', label: `SGST @ ${p.sgstRate}%`, amount: p.sgst, isSubItem: true, gstRate: p.sgstRate }] : []),
     ...(p.igst > 0 ? [{ id: 'igst', label: 'IGST', amount: p.igst, isSubItem: true }] : []),
     ...(p.serviceCharge > 0 ? [{ id: 'sc', label: '⚠ Service Charge (ILLEGAL)', amount: p.serviceCharge, isSubItem: true, flagSeverity: 'danger' as const, flagMessage: 'Illegal under CCPA 2022' }] : []),
-    { id: 'total', label: 'Grand Total', amount: p.grandTotal }
+    { id: 'total', label: 'Grand Total', amount: trustedGrandTotal }
   ];
 
   const gstDetails: GSTDetails = {
@@ -332,7 +362,7 @@ function buildRestaurant(p: RestaurantParsed): BillData {
     serviceChargePresent: p.serviceCharge > 0, serviceChargeAmount: p.serviceCharge
   };
 
-  const totalAmt = p.grandTotal > 0 ? p.grandTotal : reliableSubtotal + totalGST;
+  const totalAmt = trustedGrandTotal;
 
   return {
     id: `scanned-${Date.now()}`,
