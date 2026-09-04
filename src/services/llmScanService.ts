@@ -25,13 +25,9 @@ function dataUrlToBase64(dataUrl: string): { base64: string; mediaType: string }
   return { mediaType: match[1], base64: match[2] };
 }
 
-export async function scanBillWithLLM(imageDataUrl: string, billType: BillType): Promise<BillData> {
-  if (!isLLMScanSupported(billType)) {
-    throw new Error(`LLM scanning is not configured/supported for "${billType}"`);
-  }
+function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
-  const { base64, mediaType } = dataUrlToBase64(imageDataUrl);
-
+async function callScanEndpoint(base64: string, mediaType: string, billType: BillType): Promise<LLMBillExtraction> {
   const resp = await fetch(LLM_SCAN_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -43,6 +39,31 @@ export async function scanBillWithLLM(imageDataUrl: string, billType: BillType):
     throw new Error(body?.error || `LLM scan request failed (HTTP ${resp.status})`);
   }
 
-  const data = await resp.json() as LLMBillExtraction;
-  return buildBillFromLLMExtraction(data, billType);
+  return await resp.json() as LLMBillExtraction;
+}
+
+// Observed in practice: the model occasionally returns a transient "request not
+// allowed" style error that succeeds on an immediate retry (no change in input).
+// A couple of quick retries here means a one-off hiccup doesn't force a user all
+// the way back to the OCR fallback for bills where OCR alone can't read the table.
+const MAX_ATTEMPTS = 3;
+
+export async function scanBillWithLLM(imageDataUrl: string, billType: BillType): Promise<BillData> {
+  if (!isLLMScanSupported(billType)) {
+    throw new Error(`LLM scanning is not configured/supported for "${billType}"`);
+  }
+
+  const { base64, mediaType } = dataUrlToBase64(imageDataUrl);
+
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const data = await callScanEndpoint(base64, mediaType, billType);
+      return buildBillFromLLMExtraction(data, billType);
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_ATTEMPTS) await delay(600 * attempt);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('LLM scan failed after retries');
 }
