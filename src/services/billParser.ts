@@ -486,33 +486,34 @@ function buildElectricity(raw: string): BillData {
   // Consumer & Connection details
   const serviceConn = getStr(raw, /(?:service\s*connection|servie\s*connection|consumer\s*no)[^0-9]*([0-9\-]+)/i)
                    ?? getStr(raw, /(09-\d{3}-\d{3}-\d{3})/);
-  const consumerName = getStr(raw, /(?:consumer|name\/address)[^:\n]*[:\n]\s*([A-Z0-9.\s]+?)(?:\s+PLOT|\s+NO|\s+STREET|\n|$)/i);
+  // Name sits immediately after the "...of the Consumer" label, right before the address
+  // (PLOT/DOOR/FLAT/a house number). Bounded + anchored to that neighbourhood so it can't
+  // run on into unrelated header text further down the page (there's no reliable line break
+  // to stop at — PDF text extraction joins the whole page into one line).
+  const consumerName = getStr(raw, /consumer\s{0,3}[:\n]?\s{0,3}([A-Z][A-Za-z.\s]{1,30}?)(?=\s+(?:PLOT|DOOR|FLAT|NO\.?|STREET|\d)|,|\n)/i);
 
-  // 1. Units consumed — strictly exclude year numbers (2020–2030)
+  // 1. Units consumed — read directly off the meter-reading row, the only reliably
+  // structured source for this ("Final Reading | Initial Reading | MF | Consumption ...").
+  // e.g. "READING 8120.0 7490.0 1 630.0 0.00 0.0 0.0"
   let units = 0;
-  const consumptionMatch = flat.match(/consumption[a-z0-9\s\[\]\&\-_]*:?\s*([\d,]+(?:\.\d+)?)/i);
-  if (consumptionMatch) {
-    const val = parseFloat(consumptionMatch[1].replace(/,/g, ''));
-    if (val > 0 && (val < 2020 || val > 2030)) units = val;
+  const readingMatch = flat.match(/reading\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/i);
+  if (readingMatch) {
+    const finalR = parseFloat(readingMatch[1]);
+    const initialR = parseFloat(readingMatch[2]);
+    const consumptionCol = parseFloat(readingMatch[4]);
+    const diff = finalR - initialR;
+    if (consumptionCol > 0 && consumptionCol < 5000) units = consumptionCol;
+    else if (diff > 0 && diff < 5000) units = diff;
   }
   if (!units) {
-    // Try reading table difference: e.g. "READING 3389.0 2968.0 1 421.0" or "READING 7490.0 6580.0 1 910.0"
-    const m = flat.match(/reading\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+\d+\s+(\d+(?:\.\d+)?)/i);
-    if (m) {
-      const diff = parseFloat(m[1]) - parseFloat(m[2]);
-      const val = parseFloat(m[3]);
-      if (val > 0 && (val < 2020 || val > 2030)) units = val;
-      else if (diff > 0 && (diff < 2020 || diff > 2030)) units = diff;
-    }
-  }
-  if (!units) {
-    const m = flat.match(/(\d+)\s*units/i);
+    // Fallback: an explicit "NNN units" mention elsewhere on the bill
+    const m = flat.match(/\b(\d{1,4})\s*units\b/i);
     if (m) {
       const val = parseFloat(m[1]);
-      if (val > 0 && (val < 2020 || val > 2030)) units = val;
+      if (val > 0 && val < 5000) units = val;
     }
   }
-  const consumedUnits = Math.round(units) || 421;
+  const consumedUnits = Math.round(units);
 
   // 2. Bill Total Amount (Net Payable) — strictly exclude year numbers (2020–2030)
   let total = 0;
@@ -527,28 +528,28 @@ function buildElectricity(raw: string): BillData {
     }
   }
 
-  // 3. Line Item charges
-  let energyCharges = getNum(flat, /energy\s*charges[^\d]*([\d,]+\.?\d*)/i);
-  let govtSubsidy   = getNum(flat, /govt\s*subsidy[^\d]*-?\s*([\d,]+\.?\d*)/i);
-  const adjustments   = getNum(flat, /adjustments[^\d]*([\d,]+\.?\d*)/i);
-  const roundOff      = getNum(flat, /round\s*off[^\d]*(-?[\d,]+\.?\d*)/i);
+  // 3. Line Item charges — tax-invoice-style EB bills print an HSN/SAC code (a bare
+  // integer, e.g. "2716 0000") between the label and the actual amount, so grabbing the
+  // first number after the label picks up the code instead. Money on these bills is
+  // always printed with two decimals, so look for the first "X.XX"-shaped number in a
+  // bounded window after the label instead — that skips the code and lands on the amount.
+  const moneyAfter = (labelRe: RegExp, window = 100): number => {
+    const idx = flat.search(labelRe);
+    if (idx < 0) return 0;
+    const m = flat.slice(idx, idx + window).match(/([\d,]+\.\d{2})/);
+    return m ? parseFloat(m[1].replace(/,/g, '')) : 0;
+  };
+  const energyCharges = moneyAfter(/energy\s*charges/i);
+  const govtSubsidy   = moneyAfter(/govt\s*subsidy/i);
+  const adjustments   = moneyAfter(/adjustments/i);
+  const roundOff       = getNum(flat, /round\s*off[^\d]*(-?[\d,]+\.?\d*)/i);
 
-  // Sync charges based on exact consumedUnits if OCR missed specific row values
-  if (consumedUnits === 421 || (consumedUnits >= 400 && consumedUnits <= 450 && energyCharges === 0)) {
-    energyCharges = 2055.45;
-    govtSubsidy = 748.15;
-    if (!total || total === 2026) total = 1307;
-  } else if (consumedUnits === 910 || (consumedUnits >= 880 && consumedUnits <= 950 && energyCharges === 0)) {
-    energyCharges = 4691.50;
-    govtSubsidy = 1824.75;
-    if (!total || total === 2026) total = 1314;
-  }
-
-  // Fallback total computation from energy charges - subsidy if total is missing
+  // Fallback total computation from energy charges - subsidy if the total label wasn't found.
+  // If neither this nor the label search above found anything, leave total at 0 — the
+  // caller's low-quality fallback handles an unreadable bill rather than us guessing a number.
   if (!total && energyCharges > 0) {
     total = Math.round((energyCharges - govtSubsidy - adjustments) * 100) / 100;
   }
-  if (!total || total > 20000) total = consumedUnits > 500 ? 1314 : 1307;
 
   // Dates & Month
   const dueDate = getStr(raw, /due\s*date[^\d]*([\d\/\-\.]{6,})/i) ?? '-';
@@ -587,7 +588,9 @@ function buildElectricity(raw: string): BillData {
     billDate: todayStr(),
     dueDate,
     totalAmount: total,
-    summaryPlain: `TANGEDCO bi-monthly residential bill for ${consumedUnits} units. ${excessUnits > 0 ? `You crossed into the highest slab (501+ units) by ${excessUnits} units.` : 'Within subsidised slab limits (under 500 units).'}${govtSubsidy > 0 ? ` Govt subsidy applied: -₹${govtSubsidy.toFixed(2)}.` : ''} Net payable: ₹${total.toLocaleString('en-IN')}.`,
+    summaryPlain: consumedUnits > 0
+      ? `TANGEDCO bi-monthly residential bill for ${consumedUnits} units. ${excessUnits > 0 ? `You crossed into the highest slab (501+ units) by ${excessUnits} units.` : 'Within subsidised slab limits (under 500 units).'}${govtSubsidy > 0 ? ` Govt subsidy applied: -₹${govtSubsidy.toFixed(2)}.` : ''} Net payable: ₹${total.toLocaleString('en-IN')}.`
+      : `TANGEDCO bi-monthly residential bill. Units consumed could not be read clearly.${govtSubsidy > 0 ? ` Govt subsidy applied: -₹${govtSubsidy.toFixed(2)}.` : ''} Net payable: ₹${total.toLocaleString('en-IN')}.`,
     lineItems,
     ebDetails: {
       state: 'tamil_nadu',
@@ -607,10 +610,17 @@ function buildElectricity(raw: string): BillData {
       } : undefined
     },
     flags: [
-      excessUnits > 0
+      ...(consumedUnits === 0 ? [{
+        id: 'ocr-low-quality' as const,
+        severity: 'warning' as const,
+        title: '⚠ Units Consumed Unclear — Retake for Full Breakdown',
+        description: 'We could read the bill amount but not the meter-reading row clearly. For an accurate slab-by-slab breakdown, please retake a sharper photo/scan in good light or re-upload the original.',
+        lawCitation: ''
+      }] : []),
+      ...(consumedUnits === 0 ? [] : [excessUnits > 0
         ? {
             id: 'flag-eb-slab-jump',
-            severity: 'danger',
+            severity: 'danger' as const,
             title: `⚠ High Slab Warning — ${excessUnits} Units Over 500 Threshold`,
             description: `You consumed ${consumedUnits} units. The ${excessUnits} units above 500 are billed at the maximum ₹8.40/unit tier. Reducing usage below 500 units saves ~₹${Math.round(excessUnits * 8.40)} per cycle.`,
             savingsPotential: Math.round(excessUnits * 8.40),
@@ -620,11 +630,11 @@ function buildElectricity(raw: string): BillData {
           }
         : {
             id: 'flag-eb-normal',
-            severity: 'good',
+            severity: 'good' as const,
             title: `✓ Consumption (${consumedUnits} Units) Within Subsidised Slabs`,
             description: `Total consumption of ${consumedUnits} units is under the 500-unit high penalty threshold. First 100 units free by TN Govt subsidy.`,
             lawCitation: 'TN Govt Energy Dept G.O. Ms. No. 34'
-          },
+          }]),
       {
         id: 'flag-eb-no-gst',
         severity: 'good',
