@@ -56,6 +56,32 @@ export function getBestMatchingSample(type: BillType): BillData {
   return SAMPLE_BILLS.find(b => b.type === type) ?? SAMPLE_BILLS[0];
 }
 
+/**
+ * An honest "couldn't read this" result — no borrowed numbers from an unrelated
+ * sample bill. Substituting a real sample's total/items here (as this used to do)
+ * reads as a genuine result for a different bill, which is actively misleading:
+ * a user scanning their own ₹693 receipt seeing a confident "₹80" with a small
+ * warning banner easily mistakes it for a (wrong) read of their bill, not a
+ * stand-in for a bill that couldn't be read at all.
+ */
+function buildUnreadablePlaceholder(type: BillType, title: string, description: string): BillData {
+  return {
+    id: `scanned-${Date.now()}`,
+    type,
+    state: 'national',
+    billerName: 'Could Not Read This Bill',
+    categoryLabel: getBestMatchingSample(type).categoryLabel,
+    billNumber: '-',
+    billingCycle: '-',
+    billDate: '-',
+    dueDate: '-',
+    totalAmount: 0,
+    summaryPlain: 'We could not reliably read this bill. Please retake a clearer photo in good light, or re-upload the original file.',
+    lineItems: [],
+    flags: [{ id: 'ocr-low-quality', severity: 'warning', title, description, lawCitation: '' }]
+  };
+}
+
 // ─── Main Scan Pipeline ──────────────────────────────────────────────────────
 
 export interface ScanResult {
@@ -161,33 +187,22 @@ export async function scanRealBill(
   if (ocrText && ocrText.trim().length > 20 && !veryLowConfidence) {
     parsedBill = parseBillFromOCR(ocrText, detectedType);
 
-    // If parsing extracted totalAmount = 0, fall back to best sample with low-quality warning banner
+    // If parsing extracted totalAmount = 0, this bill genuinely couldn't be read —
+    // show that honestly instead of a different bill's real numbers.
     if (!parsedBill.totalAmount || parsedBill.totalAmount === 0) {
-      parsedBill = { ...getBestMatchingSample(detectedType), id: `scanned-${Date.now()}` };
-      parsedBill.flags = [
-        {
-          id: 'ocr-low-quality',
-          severity: 'warning',
-          title: '⚠ Image Quality Too Low for Full Extraction',
-          description: 'The uploaded image was not clear enough to reliably extract line items. Try a higher-resolution photo in good lighting. Showing standard breakdown for this bill type instead.',
-          lawCitation: ''
-        },
-        ...parsedBill.flags
-      ];
+      parsedBill = buildUnreadablePlaceholder(
+        detectedType,
+        '⚠ Image Quality Too Low for Full Extraction',
+        'The uploaded image was not clear enough to reliably extract the total or line items. Try a higher-resolution photo in good lighting, or edit the amounts in manually.'
+      );
     }
   } else {
-    // No usable OCR text — use best sample for this type with low-quality warning banner
-    parsedBill = { ...getBestMatchingSample(detectedType), id: `scanned-${Date.now()}` };
-    parsedBill.flags = [
-      {
-        id: 'ocr-low-quality',
-        severity: 'warning',
-        title: '⚠ Photo / Document Blurry or Unreadable',
-        description: 'The uploaded file/photo was too blurry or dark to extract text. Please re-take a clear photo in good light or re-upload the original document.',
-        lawCitation: ''
-      },
-      ...parsedBill.flags
-    ];
+    // No usable OCR text — genuinely unreadable, say so rather than showing a stand-in bill's numbers
+    parsedBill = buildUnreadablePlaceholder(
+      detectedType,
+      '⚠ Photo / Document Blurry or Unreadable',
+      'The uploaded file/photo was too blurry or dark to extract text. Please re-take a clear photo in good light or re-upload the original document.'
+    );
   }
 
   // Step 4 — Done
