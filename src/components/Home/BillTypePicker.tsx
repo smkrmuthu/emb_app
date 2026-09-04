@@ -1,6 +1,6 @@
 import React from 'react';
 import { BillType } from '../../types/bill';
-import { Zap, Utensils, ShoppingCart, X, HelpCircle } from 'lucide-react';
+import { Zap, CreditCard, Utensils, ShoppingCart, Hotel, Flame, X, HelpCircle } from 'lucide-react';
 
 interface BillTypePickerProps {
   fileName: string;
@@ -8,7 +8,7 @@ interface BillTypePickerProps {
   onCancel: () => void;
 }
 
-const BILL_TYPES: { type: BillType; label: string; icon: React.ReactNode; desc: string; color: string }[] = [
+const BILL_TYPES: { type: BillType; label: string; icon: React.ReactNode; desc: string; color: string; disabled?: boolean }[] = [
   {
     type: 'restaurant',
     label: 'Restaurant / Dining',
@@ -24,15 +24,36 @@ const BILL_TYPES: { type: BillType; label: string; icon: React.ReactNode; desc: 
     color: '#D97706'
   },
   {
+    type: 'credit_card',
+    label: 'Credit Card / EMI',
+    icon: <CreditCard size={20} />,
+    desc: 'HDFC, ICICI, Axis, SBI, Kotak or any bank card',
+    color: '#B33A2E',
+    disabled: true
+  },
+  {
     type: 'grocery',
     label: 'Supermarket / Grocery',
     icon: <ShoppingCart size={20} />,
     desc: 'DMart, BigBasket, Reliance Fresh, kirana stores',
     color: '#2563EB'
+  },
+  {
+    type: 'hotel',
+    label: 'Hotel Stay Folio',
+    icon: <Hotel size={20} />,
+    desc: 'Room charges, resort fees, minibar, in-room dining',
+    color: '#7C3AED',
+    disabled: true
+  },
+  {
+    type: 'gas',
+    label: 'Gas Bill (LPG / PNG)',
+    icon: <Flame size={20} />,
+    desc: 'Indane, HPCL, Bharat Gas, IGL, MGL piped gas',
+    color: '#DC2626',
+    disabled: true
   }
-  // Credit Card/EMI, Hotel, and Gas are temporarily disabled — not in active use yet.
-  // Re-add an entry here (see the removed git history for the exact shape) to bring
-  // one back once it's wired up.
 ];
 
 export const BillTypePicker: React.FC<BillTypePickerProps> = ({ fileName, onSelect, onCancel }) => {
@@ -63,31 +84,49 @@ export const BillTypePicker: React.FC<BillTypePickerProps> = ({ fileName, onSele
             We couldn't auto-detect the bill type from the filename. Select the category and we'll decode it with the right rules:
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            {BILL_TYPES.map(({ type, label, icon, desc, color }) => (
+            {BILL_TYPES.map(({ type, label, icon, desc, color, disabled }) => (
               <button
                 key={type}
-                onClick={() => onSelect(type)}
+                onClick={() => { if (!disabled) onSelect(type); }}
+                disabled={disabled}
+                aria-disabled={disabled}
+                title={disabled ? 'Coming soon — not available yet' : undefined}
                 style={{
-                  background: 'var(--paper-2)',
+                  position: 'relative',
+                  background: disabled ? 'var(--paper)' : 'var(--paper-2)',
                   border: '1.5px solid var(--line)',
                   borderRadius: '10px',
                   padding: '12px 10px',
                   textAlign: 'left',
-                  cursor: 'pointer',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
                   transition: 'all 0.15s ease',
-                  fontFamily: 'var(--font-sans)'
+                  fontFamily: 'var(--font-sans)',
+                  opacity: disabled ? 0.5 : 1
                 }}
                 onMouseEnter={e => {
+                  if (disabled) return;
                   (e.currentTarget as HTMLButtonElement).style.borderColor = color;
                   (e.currentTarget as HTMLButtonElement).style.background = 'var(--paper-3)';
                 }}
                 onMouseLeave={e => {
+                  if (disabled) return;
                   (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--line)';
                   (e.currentTarget as HTMLButtonElement).style.background = 'var(--paper-2)';
                 }}
               >
-                <div style={{ color, marginBottom: '6px' }}>{icon}</div>
-                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>{label}</div>
+                {disabled && (
+                  <span style={{
+                    position: 'absolute', top: '8px', right: '8px',
+                    fontSize: '8.5px', fontWeight: 700, letterSpacing: '0.03em',
+                    color: 'var(--muted)', background: 'var(--paper-2)',
+                    border: '1px solid var(--line)', borderRadius: '999px',
+                    padding: '2px 6px'
+                  }}>
+                    SOON
+                  </span>
+                )}
+                <div style={{ color: disabled ? 'var(--muted)' : color, marginBottom: '6px' }}>{icon}</div>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: disabled ? 'var(--muted)' : 'var(--ink)' }}>{label}</div>
                 <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '2px', lineHeight: 1.35 }}>{desc}</div>
               </button>
             ))}
