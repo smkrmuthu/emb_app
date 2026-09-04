@@ -23,7 +23,13 @@ export const HomeView: React.FC<HomeViewProps> = ({ onSelectBill, onUploadBill }
     }
   };
 
+  // Credit Card/EMI, Hotel, and Gas are temporarily disabled app-wide (see
+  // BillTypePicker.tsx) — hide their sample chips too so there's nowhere left
+  // to "discover" a category you can no longer actually scan a bill into.
+  const DISABLED_TYPES: BillData['type'][] = ['credit_card', 'hotel', 'gas'];
+
   const filteredBills = SAMPLE_BILLS.filter((b) => {
+    if (DISABLED_TYPES.includes(b.type)) return false;
     if (selectedState === 'all') return true;
     return b.state === selectedState || b.state === 'national';
   });
@@ -101,11 +107,11 @@ export const HomeView: React.FC<HomeViewProps> = ({ onSelectBill, onUploadBill }
       <div style={{ marginTop: '16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
         <div className="section-label">
           <span>RECENT SCANNED BILLS</span>
-          <span>{SAMPLE_BILLS.slice(0, 3).length} BILLS</span>
+          <span>{filteredBills.slice(0, 3).length} BILLS</span>
         </div>
 
         <div className="recent-list">
-          {SAMPLE_BILLS.slice(0, 3).map((bill) => {
+          {filteredBills.slice(0, 3).map((bill) => {
             const hasOverchargeFlag = bill.flags.some((f) => f.severity === 'danger');
             return (
               <div

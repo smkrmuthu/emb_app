@@ -52,7 +52,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             Upload or Select Bill
           </div>
           <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '2px', marginBottom: '12px' }}>
-            Supports Indian Electricity, Restaurant, Credit Card, Hotel, Grocery & Gas bills.
+            Supports Indian Electricity, Restaurant & Grocery bills.
           </div>
 
           <BillUploader onFileSelected={(fileName, sampleId) => onUploadBill(fileName, sampleId || 'tn-eb-612')} />
@@ -60,7 +60,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div style={{ marginTop: '16px' }}>
             <div className="section-label">SAMPLE INDIAN BILLS (PHASE 1)</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {SAMPLE_BILLS.map((bill) => (
+              {SAMPLE_BILLS.filter((bill) => !['credit_card', 'hotel', 'gas'].includes(bill.type)).map((bill) => (
                 <div
                   key={bill.id}
                   className={`recent-item ${activeBill.id === bill.id ? 'active-item' : ''}`}

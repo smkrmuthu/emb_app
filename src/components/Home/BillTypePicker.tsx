@@ -1,6 +1,6 @@
 import React from 'react';
 import { BillType } from '../../types/bill';
-import { Zap, CreditCard, Utensils, ShoppingCart, Hotel, Flame, X, HelpCircle } from 'lucide-react';
+import { Zap, Utensils, ShoppingCart, X, HelpCircle } from 'lucide-react';
 
 interface BillTypePickerProps {
   fileName: string;
@@ -24,33 +24,15 @@ const BILL_TYPES: { type: BillType; label: string; icon: React.ReactNode; desc: 
     color: '#D97706'
   },
   {
-    type: 'credit_card',
-    label: 'Credit Card / EMI',
-    icon: <CreditCard size={20} />,
-    desc: 'HDFC, ICICI, Axis, SBI, Kotak or any bank card',
-    color: '#B33A2E'
-  },
-  {
     type: 'grocery',
     label: 'Supermarket / Grocery',
     icon: <ShoppingCart size={20} />,
     desc: 'DMart, BigBasket, Reliance Fresh, kirana stores',
     color: '#2563EB'
-  },
-  {
-    type: 'hotel',
-    label: 'Hotel Stay Folio',
-    icon: <Hotel size={20} />,
-    desc: 'Room charges, resort fees, minibar, in-room dining',
-    color: '#7C3AED'
-  },
-  {
-    type: 'gas',
-    label: 'Gas Bill (LPG / PNG)',
-    icon: <Flame size={20} />,
-    desc: 'Indane, HPCL, Bharat Gas, IGL, MGL piped gas',
-    color: '#DC2626'
   }
+  // Credit Card/EMI, Hotel, and Gas are temporarily disabled — not in active use yet.
+  // Re-add an entry here (see the removed git history for the exact shape) to bring
+  // one back once it's wired up.
 ];
 
 export const BillTypePicker: React.FC<BillTypePickerProps> = ({ fileName, onSelect, onCancel }) => {

@@ -26,15 +26,17 @@ export interface ScanProgressCallback {
  * Detects bill type from filename using broad prefix matching
  * to handle common misspellings (restaurent, restauran, etc.)
  */
+// Credit Card/EMI, Hotel, and Gas are temporarily disabled app-wide — not in active
+// use yet (see BillTypePicker.tsx). Auto-detection deliberately skips them below so
+// an upload that would've matched one of those keywords falls through to the picker
+// (which now only offers the active categories) instead of silently scanning as a
+// type the user can no longer pick directly.
 export function detectBillTypeFromFilename(fileName: string): BillType | null {
   const n = fileName.toLowerCase();
   if (/electricit|\beb\b|tnpdcl|kseb|tangedco|tsspdcl|tsnpdcl|bescom|msedcl|kwh/.test(n)) return 'electricity';
   // "restaur" prefix catches: restaurant, restaurent, restauran, restaurateur
   if (/restaur|cafe|dining|zomato|swiggy|saravana|sangeetha|geeraas|bhavan|biryani|\bdosa\b|idly|thali|eatery|\bfood\b|canteen/.test(n)) return 'restaurant';
-  if (/credit.?card|hdfc.*card|icici.*card|axis.*card|sbi.*card|\bemi\b|card.*stmt/.test(n)) return 'credit_card';
   if (/grocer|supermarket|dmart|bigbasket|reliance.*fresh|kirana/.test(n)) return 'grocery';
-  if (/\bhotel\b|resort|\binn\b|lodge|folio|check.?in/.test(n)) return 'hotel';
-  if (/\bgas\b|\blpg\b|indane|\bigl\b|\bmgl\b|cylinder/.test(n)) return 'gas';
   return null;
 }
 
@@ -45,10 +47,7 @@ function detectBillTypeFromText(text: string): BillType | null {
   const t = text.toLowerCase();
   if (/geeraas|restaurant|restaurent|saravana|sangeetha|cafe|dining|food\s*bill|take\s*away|takeaway|menu|dosa|idly|vadai|biryani|thali|cgst|sgst/.test(t)) return 'restaurant';
   if (/tangedco|tnpdcl|kseb|tsspdcl|bescom|electricity|units\s*consumed|kwh|tariff\s*slab|current\s*consumption|service\s*connection|minnagam|tnebenet/.test(t)) return 'electricity';
-  if (/credit\s*card|statement|minimum.*due|total.*due|credit\s*limit|outstanding\s*balance/.test(t)) return 'credit_card';
   if (/grocery|supermarket|dmart|bigbasket|mrt|mrp|net.*amount.*items/.test(t)) return 'grocery';
-  if (/hotel|resort|folio|room\s*(?:charge|tariff|rate)|check.?in|check.?out/.test(t)) return 'hotel';
-  if (/lpg|cylinder|indane|bharat\s*gas|igl|mgl|piped\s*gas/.test(t)) return 'gas';
   return null;
 }
 
