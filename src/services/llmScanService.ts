@@ -11,7 +11,7 @@ import { buildBillFromLLMExtraction, LLMBillExtraction } from './billParser';
 // Set this to your deployed worker's URL after running `wrangler deploy` from
 // worker/ (see worker/README.md). Left blank so the app safely falls back to
 // the existing OCR pipeline until this is configured.
-export const LLM_SCAN_ENDPOINT = '';
+export const LLM_SCAN_ENDPOINT = 'https://emb-bill-scanner.smkrmuthu.workers.dev';
 
 const SUPPORTED_TYPES: BillType[] = ['restaurant', 'grocery', 'electricity'];
 

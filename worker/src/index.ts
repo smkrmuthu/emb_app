@@ -98,12 +98,12 @@ Rules:
   electricity: `Read this photo/page of an Indian electricity (EB) bill precisely and extract the fields in the given schema.
 Rules:
 - Read every number exactly as printed — never estimate, round, or invent a value you can't actually see.
-- consumedUnits is the actual electricity units consumed this billing cycle. Most Indian EB bills print a meter-reading row/table with columns like "Final Reading | Initial Reading | MF | Consumption" — the Consumption column (or Final minus Initial, multiplied by MF if MF isn't 1) is consumedUnits. Do NOT confuse this with a connection/account/meter number.
+- consumedUnits is the single most important field — read it carefully. Most Indian EB bills print a meter-reading row/table with columns "Final Reading | Initial Reading | MF | Consumption". Read the Final Reading and Initial Reading digit-by-digit, then compute Final minus Initial yourself (times MF, if MF isn't 1) — use that computed value, and cross-check it against the printed "Consumption" column if one exists; if they disagree, trust your own Final-minus-Initial calculation over a printed column that may be harder to read. This is a bi-monthly bill, so consumedUnits is usually in the range of a few hundred to low thousands — a value under 50 is almost always a misread. Do NOT confuse this field with a connection/account/meter number (those are long ID strings, not consumption).
 - energyCharges is the base energy charge amount (often has an HSN/SAC code like "2716 0000" printed right next to it — that code is NOT the amount; read the actual rupee figure, which is usually printed with two decimals).
 - govtSubsidy is the subsidy amount subtracted (printed as a negative or under "Less:"), as a positive number.
 - adjustments is any other deduction (e.g. "Adjustments", "Advance CC Adj", "Refund of SD" totals), as a positive number.
 - grandTotal is the final "Net Payable"/"Bill Amount" actually due, exactly as printed.
-- serviceConnectionNumber and consumerName come from the consumer details section (the actual customer's name, not the utility company's name).
+- serviceConnectionNumber and consumerName come from the consumer details section. consumerName is a person's name only (e.g. "DINESH.R") — never include the address, plot/door number, or street name that follows it.
 - If a field genuinely isn't printed on the bill or isn't legible, use null rather than guessing.`
 };
 

@@ -31,3 +31,8 @@ dist-ssr
 # Cloudflare Worker local state / secrets
 .wrangler
 worker/.dev.vars
+
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
