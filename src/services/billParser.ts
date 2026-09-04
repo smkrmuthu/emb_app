@@ -44,7 +44,7 @@ function todayStr(): string {
 
 // ─── Restaurant ───────────────────────────────────────────────────────────────
 
-interface RestaurantParsed {
+export interface RestaurantParsed {
   restaurantName: string;
   gstin?: string;
   billNumber?: string;
@@ -242,7 +242,7 @@ function parseRestaurant(raw: string): RestaurantParsed {
 }
 
 
-function buildRestaurant(p: RestaurantParsed): BillData {
+export function buildRestaurant(p: RestaurantParsed): BillData {
   const totalGST     = p.cgst + p.sgst + p.igst;
   const expectedTotal = p.subtotal + totalGST + p.serviceCharge;
 
@@ -381,7 +381,17 @@ function buildRestaurant(p: RestaurantParsed): BillData {
 
 // ─── Grocery ──────────────────────────────────────────────────────────────────
 
-function buildGrocery(raw: string): BillData {
+export interface GroceryParsed {
+  storeName: string;
+  items: Array<{ label: string; amount: number }>;
+  discount: number;
+  roundOff: number;
+  grandTotal: number;
+  billNumber?: string;
+  billDate?: string;
+}
+
+function parseGrocery(raw: string): GroceryParsed {
   const flat  = raw.replace(/\n/g, ' ');
   const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
   const storeName = lines.find(l => l.length > 4 && !/^\d/.test(l)) ?? 'Grocery Store';
@@ -392,12 +402,12 @@ function buildGrocery(raw: string): BillData {
   const isNoiseLine = (label: string) =>
     /total|sub\s*total|tax|gst|cgst|sgst|discount|round\s*off|no\.?\s*of\s*items|t\s*wt|weight|operator|bill\s*#|mc\s*#|ph[:.]|item\s*name|wt\/qty|price|amt\b/i.test(label);
 
-  const items: LineItem[] = [];
+  const items: Array<{ label: string; amount: number }> = [];
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^(.+?)\s{2,}([\d,]+\.?\d*)\s*$/);
     if (m && !isNoiseLine(m[1]) && (m[1].match(/[A-Za-z]/g)?.length ?? 0) >= 2) {
       const amt = parseFloat(m[2].replace(',', ''));
-      if (amt > 0) items.push({ id: `g${i}`, label: m[1].trim(), amount: amt });
+      if (amt > 0) items.push({ label: m[1].trim(), amount: amt });
     }
   }
 
@@ -414,7 +424,7 @@ function buildGrocery(raw: string): BillData {
         const amt = cols[cols.length - 1];
         const label = nameMatch[1].trim();
         if (label.length >= 2 && amt > 0) {
-          items.push({ id: `g${i}`, label, amount: amt });
+          items.push({ label, amount: amt });
         }
       }
     }
@@ -447,12 +457,20 @@ function buildGrocery(raw: string): BillData {
     // Otherwise trust the amount actually printed/read on the receipt.
   }
 
+  return {
+    storeName, items, discount, roundOff, grandTotal,
+    billNumber: getStr(raw, /bill\s*no[.:\s]*(\w+)/i),
+    billDate: getStr(raw, /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/)
+  };
+}
+
+export function buildGroceryFromParsed(p: GroceryParsed): BillData {
   const flags: BillFlag[] = [
     { id: 'mrp', severity: 'info', title: 'Check MRP on Each Item', description: 'Retailers cannot charge above the Maximum Retail Price printed on the package.', lawCitation: 'Legal Metrology Act 2009' },
     { id: 'gst-incl', severity: 'info', title: 'GST Is Included in MRP', description: 'For packaged goods, GST is already included in the MRP. A separate GST line on top of MRP is illegal.', lawCitation: 'GST Council – Consumer Pack Exemption' }
   ];
 
-  if (!grandTotal) {
+  if (!p.grandTotal) {
     flags.unshift({ id: 'ocr-low-quality', severity: 'warning',
       title: '⚠ Bill Total Unclear — Retake Required',
       description: 'We could not reliably read the total amount on this receipt. Please retake a sharper photo in good light or re-upload the original.',
@@ -461,23 +479,42 @@ function buildGrocery(raw: string): BillData {
 
   return {
     id: `scanned-${Date.now()}`, type: 'grocery', state: 'national',
-    billerName: storeName, categoryLabel: 'Grocery Bill',
-    billNumber: getStr(raw, /bill\s*no[.:\s]*(\w+)/i) ?? '-',
+    billerName: p.storeName, categoryLabel: 'Grocery Bill',
+    billNumber: p.billNumber ?? '-',
     billingCycle: 'Purchase',
-    billDate: getStr(raw, /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/) ?? todayStr(),
-    dueDate: 'Paid', totalAmount: grandTotal,
-    summaryPlain: `${items.length} item(s) extracted.${discount > 0 ? ` Discount: ₹${discount.toFixed(2)}.` : ''}`,
-    lineItems: [...items,
-      ...(discount > 0 ? [{ id: 'disc', label: 'Discount', amount: -discount }] : []),
-      ...(roundOff !== 0 ? [{ id: 'round', label: 'Round off', amount: roundOff, isSubItem: true }] : []),
-      { id: 'total', label: 'Total', amount: grandTotal }],
+    billDate: p.billDate ?? todayStr(),
+    dueDate: 'Paid', totalAmount: p.grandTotal,
+    summaryPlain: `${p.items.length} item(s) extracted.${p.discount > 0 ? ` Discount: ₹${p.discount.toFixed(2)}.` : ''}`,
+    lineItems: [...p.items.map((it, i) => ({ id: `g${i}`, label: it.label, amount: it.amount })),
+      ...(p.discount > 0 ? [{ id: 'disc', label: 'Discount', amount: -p.discount }] : []),
+      ...(p.roundOff !== 0 ? [{ id: 'round', label: 'Round off', amount: p.roundOff, isSubItem: true }] : []),
+      { id: 'total', label: 'Total', amount: p.grandTotal }],
     flags
   };
 }
 
+function buildGrocery(raw: string): BillData {
+  return buildGroceryFromParsed(parseGrocery(raw));
+}
+
 // ─── Electricity ──────────────────────────────────────────────────────────────
 
-function buildElectricity(raw: string): BillData {
+export interface ElectricityParsed {
+  discom: string;
+  serviceConn?: string;
+  consumerName?: string;
+  consumedUnits: number;
+  total: number;
+  energyCharges: number;
+  govtSubsidy: number;
+  adjustments: number;
+  roundOff: number;
+  dueDate: string;
+  billPeriod: string;
+  meterNumber?: string;
+}
+
+function parseElectricity(raw: string): ElectricityParsed {
   const flat = raw.replace(/\n/g, ' ');
 
   // DISCOM detection
@@ -556,6 +593,16 @@ function buildElectricity(raw: string): BillData {
   const monthStr = getStr(flat, /month\s*of\s*([A-Za-z0-9\s]+?)(?:\s+Bill|\s+Due|\n|$)/i);
   const billPeriod = monthStr ? `Month of ${monthStr.trim()}` : (getStr(flat, /bill\s*period[^\d]*([\d\/\-\.]{6,}\s*[-–]\s*[\d\/\-\.]{6,})/i) ?? 'LT Consumption Bill');
 
+  return {
+    discom, serviceConn, consumerName, consumedUnits, total,
+    energyCharges, govtSubsidy, adjustments, roundOff, dueDate, billPeriod,
+    meterNumber: getStr(raw, /meter\s*no[^\d]*(\d+)/i)
+  };
+}
+
+export function buildElectricityFromParsed(p: ElectricityParsed): BillData {
+  const { discom, serviceConn, consumerName, consumedUnits, total, energyCharges, govtSubsidy, adjustments, roundOff, dueDate, billPeriod, meterNumber } = p;
+
   // Calculate TANGEDCO Telescopic Slabs for consumedUnits
   // Slabs: 0-100 (Free), 101-200 (@ ₹2.35), 201-400 (@ ₹4.95), 401-500 (@ ₹6.80), 501+ (@ ₹8.40)
   const slabBreakdown = [
@@ -595,7 +642,7 @@ function buildElectricity(raw: string): BillData {
     ebDetails: {
       state: 'tamil_nadu',
       discomName: discom,
-      meterNumber: getStr(raw, /meter\s*no[^\d]*(\d+)/i) ?? '1026753',
+      meterNumber: meterNumber ?? '1026753',
       consumedUnits,
       slabBreakdown,
       fixedCharges: 0,
@@ -651,6 +698,10 @@ function buildElectricity(raw: string): BillData {
       }] : [])
     ]
   };
+}
+
+function buildElectricity(raw: string): BillData {
+  return buildElectricityFromParsed(parseElectricity(raw));
 }
 
 // ─── Hotel ────────────────────────────────────────────────────────────────────
@@ -761,5 +812,101 @@ export function parseBillFromOCR(rawText: string, billType: BillType): BillData 
     case 'gas':         return buildGas(rawText);
     case 'credit_card': return buildCreditCard(rawText);
     default:            return buildRestaurant(parseRestaurant(rawText));
+  }
+}
+
+// ─── LLM-based extraction (vision) ─────────────────────────────────────────────
+// Structured shape the backend's vision-model call is asked to return. This replaces
+// the "OCR text -> regex" step only — every field below feeds into the SAME
+// compliance-flag / line-item logic above (buildRestaurant, buildGroceryFromParsed,
+// buildElectricityFromParsed), so GST checks, slab math, and legal citations are
+// identical between the OCR path and the LLM path.
+export interface LLMBillExtraction {
+  billerName: string;
+  billNumber?: string;
+  billDate?: string;
+  grandTotal: number;
+
+  // Restaurant / Grocery line items
+  items?: Array<{ label: string; qty?: number; rate?: number; amount: number }>;
+  subtotal?: number;
+  cgst?: number;
+  cgstRate?: number;
+  sgst?: number;
+  sgstRate?: number;
+  igst?: number;
+  serviceCharge?: number;
+  discount?: number;
+  roundOff?: number;
+  gstin?: string;
+
+  // Electricity
+  discomName?: string;
+  serviceConnectionNumber?: string;
+  consumerName?: string;
+  meterNumber?: string;
+  consumedUnits?: number;
+  energyCharges?: number;
+  govtSubsidy?: number;
+  adjustments?: number;
+  dueDate?: string;
+  billPeriod?: string;
+}
+
+/**
+ * Builds a BillData from a clean structured extraction (e.g. from a vision-model
+ * call) instead of noisy OCR text. Only restaurant/grocery/electricity are wired up
+ * today — other types throw so the caller can fall back to the OCR pipeline.
+ */
+export function buildBillFromLLMExtraction(data: LLMBillExtraction, billType: BillType): BillData {
+  switch (billType) {
+    case 'restaurant': {
+      const items = (data.items ?? []).map(it => ({
+        label: it.label, qty: it.qty ?? 1, rate: it.rate ?? it.amount, amount: it.amount
+      }));
+      return buildRestaurant({
+        restaurantName: data.billerName,
+        gstin: data.gstin,
+        billNumber: data.billNumber,
+        billDate: data.billDate,
+        items,
+        subtotal: data.subtotal ?? 0,
+        cgst: data.cgst ?? 0, cgstRate: data.cgstRate ?? 2.5,
+        sgst: data.sgst ?? 0, sgstRate: data.sgstRate ?? 2.5,
+        igst: data.igst ?? 0,
+        serviceCharge: data.serviceCharge ?? 0,
+        grandTotal: data.grandTotal,
+        grandTotalFromOCR: true
+      });
+    }
+    case 'grocery': {
+      return buildGroceryFromParsed({
+        storeName: data.billerName,
+        items: (data.items ?? []).map(it => ({ label: it.label, amount: it.amount })),
+        discount: data.discount ?? 0,
+        roundOff: data.roundOff ?? 0,
+        grandTotal: data.grandTotal,
+        billNumber: data.billNumber,
+        billDate: data.billDate
+      });
+    }
+    case 'electricity': {
+      return buildElectricityFromParsed({
+        discom: data.discomName ?? 'TNPDCL — TANGEDCO',
+        serviceConn: data.serviceConnectionNumber,
+        consumerName: data.consumerName,
+        consumedUnits: Math.round(data.consumedUnits ?? 0),
+        total: data.grandTotal,
+        energyCharges: data.energyCharges ?? 0,
+        govtSubsidy: data.govtSubsidy ?? 0,
+        adjustments: data.adjustments ?? 0,
+        roundOff: data.roundOff ?? 0,
+        dueDate: data.dueDate ?? '-',
+        billPeriod: data.billPeriod ?? 'LT Consumption Bill',
+        meterNumber: data.meterNumber
+      });
+    }
+    default:
+      throw new Error(`LLM extraction not wired up yet for bill type "${billType}" — fall back to OCR.`);
   }
 }

@@ -1,0 +1,12 @@
+name = "emb-bill-scanner"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+# The origin allowed to call this endpoint (your deployed GitHub Pages app).
+# Change this if you ever move the frontend to a different domain.
+[vars]
+ALLOWED_ORIGIN = "https://smkrmuthu.github.io"
+
+# ANTHROPIC_API_KEY is NOT set here — it's a secret, set once via:
+#   npx wrangler secret put ANTHROPIC_API_KEY
+# (run from this worker/ directory, after `wrangler login`)

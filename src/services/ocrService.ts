@@ -11,6 +11,7 @@ import { BillData, BillType } from '../types/bill';
 import { SAMPLE_BILLS } from '../data/sampleBills';
 import { extractTextFromImage } from './realOCR';
 import { parseBillFromOCR } from './billParser';
+import { isLLMScanSupported, scanBillWithLLM } from './llmScanService';
 
 export interface ScanProgressCallback {
   stepIndex: number;
@@ -75,6 +76,28 @@ export async function scanRealBill(
   onProgress: (p: ScanProgressCallback) => void,
   pdfText?: string
 ): Promise<ScanResult> {
+
+  // Prefer the LLM-vision path when it's configured and supports this bill type —
+  // it reads the photo directly instead of going through OCR text extraction, so
+  // it isn't vulnerable to the same character-segmentation failures on dense
+  // tables. Falls straight through to the existing OCR pipeline below on any
+  // failure (network error, endpoint not deployed, model couldn't read it, etc.)
+  // so nothing regresses if the backend isn't configured or is temporarily down.
+  if (imageDataUrl && hintedType && isLLMScanSupported(hintedType)) {
+    onProgress({ stepIndex: 1, totalSteps: 4, statusText: 'Reading bill with AI…', subText: `Analysing "${fileName}"` });
+    try {
+      const llmBill = await scanBillWithLLM(imageDataUrl, hintedType);
+      onProgress({ stepIndex: 2, totalSteps: 4, statusText: 'Verifying GST & statutory rules…', subText: 'Cross-checking against Indian consumer law' });
+      await delay(200);
+      onProgress({ stepIndex: 3, totalSteps: 4, statusText: 'Auditing against Indian consumer law…', subText: 'Checking for overcharges & illegal fees' });
+      await delay(200);
+      onProgress({ stepIndex: 4, totalSteps: 4, statusText: 'Generating plain-language breakdown…', subText: 'Almost done' });
+      await delay(200);
+      return { bill: llmBill };
+    } catch (err) {
+      console.warn('LLM scan failed, falling back to OCR pipeline:', err);
+    }
+  }
 
   let ocrText = pdfText || '';
   let ocrConfidence: number | undefined;
