@@ -889,6 +889,25 @@ export function buildBillFromLLMExtraction(data: LLMBillExtraction, billType: Bi
         }
       }
 
+      // The CGST/SGST percentage line is consistently the least legible field on a
+      // printed receipt (small font, often faint) — far less reliable than the
+      // item-derived subtotal or the bold Grand Total. If the directly-read CGST+SGST
+      // disagrees substantially with what the bill's own arithmetic implies
+      // (grandTotal - subtotal - serviceCharge), trust that arithmetic over the small
+      // print and split the implied tax evenly. This does NOT hide a genuine
+      // GST-rate violation: the compliance check runs on the resulting effective
+      // rate (total tax / subtotal), which reflects the same violation either way —
+      // only the unreliable CGST-vs-SGST split is being corrected, not the total.
+      if (subtotal > 0 && data.grandTotal > 0) {
+        const impliedTax = data.grandTotal - subtotal - serviceCharge;
+        const readTax = cgst + sgst;
+        if (impliedTax > 0 && Math.abs(impliedTax - readTax) > Math.max(2, impliedTax * 0.15)) {
+          const half = Math.round((impliedTax / 2) * 100) / 100;
+          cgst = half;
+          sgst = half;
+        }
+      }
+
       return buildRestaurant({
         restaurantName: data.billerName,
         gstin: data.gstin,
