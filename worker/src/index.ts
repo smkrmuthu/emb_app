@@ -82,8 +82,9 @@ Rules:
 - Read every number exactly as printed — never estimate, round, or invent a value you can't actually see.
 - "items" is every food/drink line item with its printed quantity, rate, and amount (use null for qty/rate if only one number is printed for that line — put it in "amount").
 - Do NOT include GST/tax rows, "Sub Total", "Round off", or "Total" rows as items.
-- cgst/sgst/igst are the actual rupee tax amounts printed (not the percentage) — cgstRate/sgstRate are the percentages (e.g. 2.5 for "CGST@2.5%").
-- serviceCharge is any separately-listed "Service Charge" line (0/null if none is printed — do not assume one exists).
+- cgst/sgst/igst are the actual rupee tax amounts printed (not the percentage) — cgstRate/sgstRate are the percentages (e.g. 2.5 for "CGST@2.5%"). For a standalone restaurant, CGST and SGST are almost always equal (same rate applied to the same taxable subtotal) — if your two readings differ, re-check both against the printed digits before finalizing.
+- subtotal must equal (or very closely match) the sum of the item amounts you extracted, and should match a printed "Sub Total"/"Total" (before tax) line if one exists. Re-check your item amounts if subtotal doesn't add up.
+- serviceCharge: most Indian restaurant bills do NOT have one — only CGST and SGST. Set this to null/0 unless you see a line item distinctly labelled "Service Charge" (not CGST, not SGST, not a repeat of the tax amount). Do not invent a service charge, and never mistake a CGST or SGST amount for one — misreporting a legal tax line as an "illegal service charge" is a false accusation against the business, not a harmless rounding error.
 - grandTotal is the final amount actually payable, exactly as printed (often bold/larger text, sometimes labelled "Grand Total", "Net Amount", "Total").
 - If a field genuinely isn't printed on the bill or isn't legible, use null rather than guessing.`,
 

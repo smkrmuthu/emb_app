@@ -864,17 +864,42 @@ export function buildBillFromLLMExtraction(data: LLMBillExtraction, billType: Bi
       const items = (data.items ?? []).map(it => ({
         label: it.label, qty: it.qty ?? 1, rate: it.rate ?? it.amount, amount: it.amount
       }));
+      const subtotal = data.subtotal ?? 0;
+      let cgst = data.cgst ?? 0;
+      let sgst = data.sgst ?? 0;
+      let serviceCharge = data.serviceCharge ?? 0;
+
+      // Most Indian standalone restaurants have no service charge at all, and are
+      // legally required to charge exactly 5% GST (2.5% CGST + 2.5% SGST) — so a
+      // reported "service charge" that turns out to be a fragment of a misread tax
+      // line is a real, observed failure mode, not a hypothetical one: if folding it
+      // back into CGST/SGST brings their combined total much closer to the legally
+      // expected 5% of the subtotal than leaving it separate does, it's almost
+      // certainly a duplicated/misread tax amount, not a genuine extra charge —
+      // redistribute it back rather than accusing the business of an illegal fee.
+      if (serviceCharge > 0 && subtotal > 0) {
+        const expectedGST = subtotal * 0.05;
+        const fitWithoutServiceCharge = Math.abs((cgst + sgst) - expectedGST);
+        const fitWithServiceCharge = Math.abs((cgst + sgst + serviceCharge) - expectedGST);
+        if (fitWithServiceCharge < fitWithoutServiceCharge - 0.5) {
+          const redistributed = Math.round(((cgst + sgst + serviceCharge) / 2) * 100) / 100;
+          cgst = redistributed;
+          sgst = redistributed;
+          serviceCharge = 0;
+        }
+      }
+
       return buildRestaurant({
         restaurantName: data.billerName,
         gstin: data.gstin,
         billNumber: data.billNumber,
         billDate: data.billDate,
         items,
-        subtotal: data.subtotal ?? 0,
-        cgst: data.cgst ?? 0, cgstRate: data.cgstRate ?? 2.5,
-        sgst: data.sgst ?? 0, sgstRate: data.sgstRate ?? 2.5,
+        subtotal,
+        cgst, cgstRate: data.cgstRate ?? 2.5,
+        sgst, sgstRate: data.sgstRate ?? 2.5,
         igst: data.igst ?? 0,
-        serviceCharge: data.serviceCharge ?? 0,
+        serviceCharge,
         grandTotal: data.grandTotal,
         grandTotalFromOCR: true
       });
