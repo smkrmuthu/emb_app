@@ -49,6 +49,9 @@ const GrocerySchema = z.object({
   items: z.array(z.object({ label: z.string(), amount: z.number() })),
   discount: z.number().nullable(),
   roundOff: z.number().nullable(),
+  taxableValue: z.number().nullable(),
+  cgst: z.number().nullable(),
+  sgst: z.number().nullable(),
   grandTotal: z.number()
 });
 
@@ -93,6 +96,7 @@ Rules:
 - Read every number exactly as printed — never estimate, round, or invent a value you can't actually see.
 - "items" is every purchased product line with its amount. Do NOT include tax, discount, round-off, weight, or item-count rows as items.
 - discount and roundOff are 0/null if not printed.
+- Most grocery receipts fold GST into the item price with no separate tax line — in that common case, leave taxableValue/cgst/sgst as null. But some "TAX BILL"/tax-invoice-style receipts do print an explicit breakdown (e.g. "Value Before Tax", "CGST @2.5%", "SGST @2.5%") — when that appears, read it: taxableValue is the pre-tax value, cgst/sgst are the actual rupee tax amounts (not the percentage).
 - grandTotal is the final amount actually payable, exactly as printed — it may be labelled "Total", "Net Amount", "PAY:", or shown as a bare "₹X.XX"/"Rs.X.XX" with no label at all.
 - If a field genuinely isn't printed on the bill or isn't legible, use null rather than guessing.`,
 

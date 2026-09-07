@@ -389,6 +389,11 @@ export interface GroceryParsed {
   grandTotal: number;
   billNumber?: string;
   billDate?: string;
+  /** Only present on the minority of grocery/kirana receipts that print an explicit
+   *  tax breakdown ("TAX BILL" style) instead of folding GST silently into the price. */
+  taxableValue?: number;
+  cgst?: number;
+  sgst?: number;
 }
 
 function parseGrocery(raw: string): GroceryParsed {
@@ -465,10 +470,29 @@ function parseGrocery(raw: string): GroceryParsed {
 }
 
 export function buildGroceryFromParsed(p: GroceryParsed): BillData {
+  const taxableValue = p.taxableValue ?? 0;
+  const cgst = p.cgst ?? 0;
+  const sgst = p.sgst ?? 0;
+  const totalGST = cgst + sgst;
+  const hasTaxBreakdown = cgst > 0 && sgst > 0;
+
   const flags: BillFlag[] = [
-    { id: 'mrp', severity: 'info', title: 'Check MRP on Each Item', description: 'Retailers cannot charge above the Maximum Retail Price printed on the package.', lawCitation: 'Legal Metrology Act 2009' },
-    { id: 'gst-incl', severity: 'info', title: 'GST Is Included in MRP', description: 'For packaged goods, GST is already included in the MRP. A separate GST line on top of MRP is illegal.', lawCitation: 'GST Council – Consumer Pack Exemption' }
+    { id: 'mrp', severity: 'info', title: 'Check MRP on Each Item', description: 'Retailers cannot charge above the Maximum Retail Price printed on the package.', lawCitation: 'Legal Metrology Act 2009' }
   ];
+
+  // Most receipts fold GST silently into the price with nothing to verify. When a
+  // receipt does print an explicit breakdown (taxable value + CGST + SGST), check
+  // whether it actually reconciles to the total paid — if so, that's real evidence
+  // GST was included rather than stacked on top, so show the real figures instead
+  // of just the generic reassurance.
+  if (hasTaxBreakdown && Math.abs((taxableValue + totalGST) - p.grandTotal) <= 2) {
+    flags.push({ id: 'gst-incl', severity: 'good',
+      title: `✓ GST (₹${totalGST.toFixed(2)}) Verified Included in Price`,
+      description: `This receipt breaks out its tax: ₹${taxableValue.toFixed(2)} taxable value + ₹${totalGST.toFixed(2)} GST = ₹${(taxableValue + totalGST).toFixed(2)}, matching the total you paid. GST is correctly folded into the price, not added on top.`,
+      lawCitation: 'GST Council – Consumer Pack Exemption' });
+  } else {
+    flags.push({ id: 'gst-incl', severity: 'info', title: 'GST Is Included in MRP', description: 'For packaged goods, GST is already included in the MRP. A separate GST line on top of MRP is illegal.', lawCitation: 'GST Council – Consumer Pack Exemption' });
+  }
 
   if (!p.grandTotal) {
     flags.unshift({ id: 'ocr-low-quality', severity: 'warning',
@@ -486,6 +510,11 @@ export function buildGroceryFromParsed(p: GroceryParsed): BillData {
     dueDate: 'Paid', totalAmount: p.grandTotal,
     summaryPlain: `${p.items.length} item(s) extracted.${p.discount > 0 ? ` Discount: ₹${p.discount.toFixed(2)}.` : ''}`,
     lineItems: [...p.items.map((it, i) => ({ id: `g${i}`, label: it.label, amount: it.amount })),
+      ...(hasTaxBreakdown ? [
+        { id: 'taxable', label: 'Taxable Value', amount: taxableValue },
+        { id: 'cgst', label: 'CGST', amount: cgst, isSubItem: true },
+        { id: 'sgst', label: 'SGST', amount: sgst, isSubItem: true }
+      ] : []),
       ...(p.discount > 0 ? [{ id: 'disc', label: 'Discount', amount: -p.discount }] : []),
       ...(p.roundOff !== 0 ? [{ id: 'round', label: 'Round off', amount: p.roundOff, isSubItem: true }] : []),
       { id: 'total', label: 'Total', amount: p.grandTotal }],
@@ -839,6 +868,8 @@ export interface LLMBillExtraction {
   discount?: number;
   roundOff?: number;
   gstin?: string;
+  /** Grocery-only: pre-tax value on the minority of receipts that print an explicit tax breakdown */
+  taxableValue?: number;
 
   // Electricity
   discomName?: string;
@@ -931,7 +962,10 @@ export function buildBillFromLLMExtraction(data: LLMBillExtraction, billType: Bi
         roundOff: data.roundOff ?? 0,
         grandTotal: data.grandTotal,
         billNumber: data.billNumber,
-        billDate: data.billDate
+        billDate: data.billDate,
+        taxableValue: data.taxableValue,
+        cgst: data.cgst,
+        sgst: data.sgst
       });
     }
     case 'electricity': {
