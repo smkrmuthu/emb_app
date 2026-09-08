@@ -4,6 +4,7 @@
  */
 
 import { BillData, BillFlag, BillType, GSTDetails, LineItem } from '../types/bill';
+import { calculateMinimumDueTrap } from './billAnalyzer';
 
 // ─── Generic helpers ─────────────────────────────────────────────────────────
 
@@ -821,6 +822,29 @@ export function buildCreditCardFromParsed(p: CreditCardParsed): BillData {
     ? Math.round((p.minimumAmountDue / p.totalAmountDue) * 1000) / 10
     : undefined;
 
+  // "If you only ever pay the minimum, how long until this is actually paid off?" —
+  // reuses the same declining-balance simulator as the standalone EMI calculator,
+  // but personalized: the bill's own minDue/totalDue ratio (when both are known)
+  // instead of a generic 5% assumption, and the bill's own APR when it's printed.
+  let creditCardPayoff: BillData['creditCardPayoff'];
+  if (p.totalAmountDue > 0) {
+    const monthlyRatePercent = hasRealAPR ? p.aprPercent! / 12 : 3.6;
+    const minDueRatePercent = minDuePct !== undefined && minDuePct > 0
+      ? Math.min(Math.max(minDuePct, 1), 20) // clamp to a sane range in case of odd/garbled data
+      : 5;
+    const trap = calculateMinimumDueTrap(p.totalAmountDue, monthlyRatePercent, minDueRatePercent);
+    creditCardPayoff = {
+      monthsToPayoff: trap.monthsToPayoff,
+      yearsToPayoff: trap.yearsToPayoff,
+      totalInterestPaid: trap.totalInterestPaid,
+      totalPaid: trap.totalPaid,
+      minDueRatePercent: trap.minDueRatePercent,
+      annualAPR: trap.annualAPR,
+      neverPaysOff: trap.neverPaysOff,
+      warningSummary: trap.warningSummary
+    };
+  }
+
   const flags: BillFlag[] = [
     hasRealAPR
       ? { id: 'min', severity: 'danger',
@@ -849,7 +873,8 @@ export function buildCreditCardFromParsed(p: CreditCardParsed): BillData {
       { id: 'total', label: 'Total Amount Due', amount: p.totalAmountDue },
       ...(p.minimumAmountDue !== undefined ? [{ id: 'min', label: 'Minimum Amount Due', amount: p.minimumAmountDue, isSubItem: true, flagSeverity: 'warning' as const, flagMessage: hasRealAPR ? `Paying only minimum accrues interest at ${p.aprPercent}% APR` : 'Paying only minimum triggers 36-42% APR' }] : [])
     ],
-    flags
+    flags,
+    creditCardPayoff
   };
 }
 

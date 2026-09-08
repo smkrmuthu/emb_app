@@ -93,6 +93,17 @@ export interface EMIDetails {
   verdictStamp: string; // "NOT ZERO COST"
 }
 
+export interface CreditCardPayoffProjection {
+  monthsToPayoff: number;
+  yearsToPayoff: string;
+  totalInterestPaid: number;
+  totalPaid: number;
+  minDueRatePercent: number;
+  annualAPR: number;
+  neverPaysOff: boolean;
+  warningSummary: string;
+}
+
 export interface GSTDetails {
   taxableAmount: number;
   cgst: number;
@@ -123,6 +134,7 @@ export interface BillData {
   ebDetails?: EBDetails;
   emiDetails?: EMIDetails;
   gstDetails?: GSTDetails;
+  creditCardPayoff?: CreditCardPayoffProjection;
   translations?: Record<Language, {
     summary: string;
     keyPoints: string[];

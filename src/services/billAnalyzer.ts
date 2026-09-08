@@ -255,11 +255,11 @@ function calculateTelanganaEB(units: number): EBDetails {
 /**
  * Calculates the compounding debt trap when paying only the minimum due on an Indian credit card.
  */
-export function calculateMinimumDueTrap(outstandingBalance: number, monthlyRatePercent: number = 3.6) {
+export function calculateMinimumDueTrap(outstandingBalance: number, monthlyRatePercent: number = 3.6, minDueRatePercent: number = 5) {
   const monthlyRate = monthlyRatePercent / 100;
   const annualAPR = Number((monthlyRatePercent * 12).toFixed(1));
-  const minDueRate = 0.05; // 5% minimum due
-  
+  const minDueRate = minDueRatePercent / 100;
+
   let balance = outstandingBalance;
   let totalPaid = 0;
   let totalInterest = 0;
@@ -271,22 +271,28 @@ export function calculateMinimumDueTrap(outstandingBalance: number, monthlyRateP
     const monthlyInterest = balance * monthlyRate;
     const gstOnInterest = monthlyInterest * 0.18;
     const minPayment = Math.max(500, balance * minDueRate);
-    
+
     totalInterest += monthlyInterest + gstOnInterest;
     totalPaid += minPayment;
-    
+
     balance = balance + monthlyInterest + gstOnInterest - minPayment;
   }
+
+  const neverPaysOff = months >= maxMonths && balance > 100;
 
   return {
     outstandingBalance,
     monthlyRatePercent,
     annualAPR,
+    minDueRatePercent,
     monthsToPayoff: months,
     yearsToPayoff: (months / 12).toFixed(1),
     totalPaid: Math.round(totalPaid),
     totalInterestPaid: Math.round(totalInterest),
     extraMultiplier: (totalPaid / outstandingBalance).toFixed(1),
-    warningSummary: `If you pay only the 5% minimum due, it will take ${Math.round(months / 12)} years to pay off ₹${outstandingBalance.toLocaleString('en-IN')}, and you will pay ₹${Math.round(totalInterest).toLocaleString('en-IN')} in interest and 18% GST (${(totalPaid / outstandingBalance).toFixed(1)}x the original amount)!`
+    neverPaysOff,
+    warningSummary: neverPaysOff
+      ? `If you pay only the ${minDueRatePercent}% minimum due, the balance never actually clears within 30 years — interest keeps outpacing what a shrinking minimum payment covers.`
+      : `If you pay only the ${minDueRatePercent}% minimum due, it will take ${Math.round(months / 12)} years to pay off ₹${outstandingBalance.toLocaleString('en-IN')}, and you will pay ₹${Math.round(totalInterest).toLocaleString('en-IN')} in interest and 18% GST (${(totalPaid / outstandingBalance).toFixed(1)}x the original amount)!`
   };
 }

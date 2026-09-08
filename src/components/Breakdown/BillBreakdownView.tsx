@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BillData, BillFlag, DisputeType } from '../../types/bill';
 import { EBVisualizer } from './EBVisualizer';
+import { CreditCardPayoffWidget } from './CreditCardPayoffWidget';
 import { EditBillModal } from './EditBillModal';
 import { Volume2, FileText, CheckCircle2, AlertTriangle, AlertOctagon, Info, Share2, Percent, Camera, Tag, Edit3 } from 'lucide-react';
 
@@ -177,6 +178,9 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
 
       {/* EB Slab Breakdown if Electricity */}
       {bill.ebDetails && <EBVisualizer initialDetails={bill.ebDetails} />}
+
+      {/* Minimum-Due Payoff Projection if Credit Card */}
+      {bill.creditCardPayoff && <CreditCardPayoffWidget payoff={bill.creditCardPayoff} />}
 
       {/* Line Items List */}
       <div className="line-items-container">
