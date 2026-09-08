@@ -8,10 +8,14 @@ interface BillUploaderProps {
 
 export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) => {
   const [isDragging, setIsDragging] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const readAndEmit = async (file: File) => {
     if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      // Multi-page statements can take a while to extract text from and render
+      // client-side — show that something's happening instead of looking frozen.
+      setIsProcessing(true);
       try {
         // Process PDF client-side: extract vector text + render Page 1 image
         const pdfRes = await processPDFFile(file);
@@ -19,6 +23,8 @@ export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) =>
       } catch (err) {
         console.warn('PDF processing failed, falling back to standard reader:', err);
         onFileSelected(file.name, undefined, undefined);
+      } finally {
+        setIsProcessing(false);
       }
     } else {
       // Standard image file (JPEG, PNG, WEBP)
@@ -48,7 +54,9 @@ export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) =>
     if (e.target.files?.[0]) readAndEmit(e.target.files[0]);
   };
 
-  const triggerFileInput = () => fileInputRef.current?.click();
+  const triggerFileInput = () => {
+    if (!isProcessing) fileInputRef.current?.click();
+  };
 
   return (
     <div
@@ -61,6 +69,7 @@ export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) =>
       tabIndex={0}
       aria-label="Upload bill photo or PDF"
       onKeyDown={(e) => e.key === 'Enter' && triggerFileInput()}
+      style={isProcessing ? { cursor: 'wait', opacity: 0.75 } : undefined}
     >
       <input
         type="file"
@@ -71,11 +80,11 @@ export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) =>
         style={{ display: 'none' }}
       />
       <div className="glyph">
-        <Plus size={20} strokeWidth={2.5} />
+        {isProcessing ? <span className="font-mono" style={{ fontSize: '11px' }}>…</span> : <Plus size={20} strokeWidth={2.5} />}
       </div>
-      <div className="primary">Scan a bill</div>
+      <div className="primary">{isProcessing ? 'Reading PDF…' : 'Scan a bill'}</div>
       <div className="secondary">
-        {isDragging ? 'Drop it to scan!' : 'Upload photo or PDF · drag & drop'}
+        {isProcessing ? 'Extracting text from every page — this can take a few seconds' : isDragging ? 'Drop it to scan!' : 'Upload photo or PDF · drag & drop'}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', marginTop: '10px' }}>

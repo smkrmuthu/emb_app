@@ -5,15 +5,22 @@
 
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Set worker path from cdnjs to avoid Vite bundling worker issues
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+// Bundle the worker locally (matches the installed pdfjs-dist version exactly) instead
+// of fetching it from a CDN on first use. A CDN fetch is a race on the very first PDF
+// upload of a session: if the worker script hasn't finished loading yet, page-text
+// extraction silently returns too little text, which used to trip the "PDF unreadable"
+// fallback immediately — working only on a retry once the script was cached.
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).href;
 
 export interface PDFProcessResult {
   text: string;
   pageImage: string; // Data URL JPEG of Page 1
 }
 
-export async function processPDFFile(file: File): Promise<PDFProcessResult> {
+async function extractOnce(file: File): Promise<PDFProcessResult> {
   const arrayBuffer = await file.arrayBuffer();
   const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
   const pdf = await loadingTask.promise;
@@ -59,4 +66,22 @@ export async function processPDFFile(file: File): Promise<PDFProcessResult> {
     text: fullText,
     pageImage
   };
+}
+
+// A dev-server dependency-optimization reload (or a slow first worker warm-up) can
+// interrupt the very first PDF processed in a session, silently yielding little or no
+// text — which then trips the "PDF unreadable" fallback even though the file is fine
+// and re-uploading it immediately works. Retry once before trusting a near-empty result.
+const MIN_USABLE_TEXT_LENGTH = 50;
+
+export async function processPDFFile(file: File): Promise<PDFProcessResult> {
+  const first = await extractOnce(file);
+  if (first.text.trim().length >= MIN_USABLE_TEXT_LENGTH) {
+    return first;
+  }
+
+  console.warn('PDF text extraction returned too little text on first attempt, retrying once…');
+  await new Promise((r) => setTimeout(r, 400));
+  const second = await extractOnce(file);
+  return second.text.trim().length > first.text.trim().length ? second : first;
 }
