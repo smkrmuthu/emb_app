@@ -11,7 +11,7 @@ import { BillData, BillType } from '../types/bill';
 import { SAMPLE_BILLS } from '../data/sampleBills';
 import { extractTextFromImage } from './realOCR';
 import { parseBillFromOCR } from './billParser';
-import { isLLMScanSupported, scanBillWithLLM } from './llmScanService';
+import { isLLMScanSupported, requiresPdfText, scanBillTextWithLLM, scanBillWithLLM } from './llmScanService';
 
 export interface ScanProgressCallback {
   stepIndex: number;
@@ -26,17 +26,18 @@ export interface ScanProgressCallback {
  * Detects bill type from filename using broad prefix matching
  * to handle common misspellings (restaurent, restauran, etc.)
  */
-// Credit Card/EMI, Hotel, and Gas are temporarily disabled app-wide — not in active
-// use yet (see BillTypePicker.tsx). Auto-detection deliberately skips them below so
-// an upload that would've matched one of those keywords falls through to the picker
-// (which now only offers the active categories) instead of silently scanning as a
-// type the user can no longer pick directly.
+// Hotel and Gas are temporarily disabled app-wide — not in active use yet (see
+// BillTypePicker.tsx). Auto-detection deliberately skips them below so an upload
+// that would've matched one of those keywords falls through to the picker (which
+// only offers active categories) instead of silently scanning as a disabled type.
+// Credit Card is active but text-only — see requiresPdfText() and its handling below.
 export function detectBillTypeFromFilename(fileName: string): BillType | null {
   const n = fileName.toLowerCase();
   if (/electricit|\beb\b|tnpdcl|kseb|tangedco|tsspdcl|tsnpdcl|bescom|msedcl|kwh/.test(n)) return 'electricity';
   // "restaur" prefix catches: restaurant, restaurent, restauran, restaurateur
   if (/restaur|cafe|dining|zomato|swiggy|saravana|sangeetha|geeraas|bhavan|biryani|\bdosa\b|idly|thali|eatery|\bfood\b|canteen/.test(n)) return 'restaurant';
   if (/grocer|supermarket|dmart|bigbasket|reliance.*fresh|kirana/.test(n)) return 'grocery';
+  if (/credit.?card|hdfc.*card|icici.*card|axis.*card|sbi.*card|idfc.*card|\bemi\b|card.*stmt|card.*statement/.test(n)) return 'credit_card';
   return null;
 }
 
@@ -48,6 +49,7 @@ function detectBillTypeFromText(text: string): BillType | null {
   if (/geeraas|restaurant|restaurent|saravana|sangeetha|cafe|dining|food\s*bill|take\s*away|takeaway|menu|dosa|idly|vadai|biryani|thali|cgst|sgst/.test(t)) return 'restaurant';
   if (/tangedco|tnpdcl|kseb|tsspdcl|bescom|electricity|units\s*consumed|kwh|tariff\s*slab|current\s*consumption|service\s*connection|minnagam|tnebenet/.test(t)) return 'electricity';
   if (/grocery|supermarket|dmart|bigbasket|mrt|mrp|net.*amount.*items/.test(t)) return 'grocery';
+  if (/credit\s*card\s*statement|total\s*amount\s*due|minimum\s*amount\s*due|credit\s*limit|statement\s*period/.test(t)) return 'credit_card';
   return null;
 }
 
@@ -82,6 +84,32 @@ function buildUnreadablePlaceholder(type: BillType, title: string, description: 
   };
 }
 
+/** Credit card (and any future text-only type) genuinely can't be read from a photo —
+ *  a camera shot only captures one page, and statements are routinely 3+ pages. */
+function buildPdfRequiredPlaceholder(type: BillType): BillData {
+  return {
+    id: `scanned-${Date.now()}`,
+    type,
+    state: 'national',
+    billerName: 'PDF Statement Needed',
+    categoryLabel: 'Credit Card Statement',
+    billNumber: '-',
+    billingCycle: '-',
+    billDate: '-',
+    dueDate: '-',
+    totalAmount: 0,
+    summaryPlain: 'Credit card statements need to be uploaded as the original PDF, not a photo — a camera shot only captures one page, and statements usually run several.',
+    lineItems: [],
+    flags: [{
+      id: 'pdf-required',
+      severity: 'warning',
+      title: '⚠ Please Upload the PDF Statement',
+      description: 'A photo can only capture one page, but credit card statements are usually 3+ pages. Download the PDF statement from your bank\'s app/website (Statements section) and upload that file instead — every page will be read.',
+      lawCitation: ''
+    }]
+  };
+}
+
 // ─── Main Scan Pipeline ──────────────────────────────────────────────────────
 
 export interface ScanResult {
@@ -102,25 +130,49 @@ export async function scanRealBill(
   pdfText?: string
 ): Promise<ScanResult> {
 
-  // Prefer the LLM-vision path when it's configured and supports this bill type —
-  // it reads the photo directly instead of going through OCR text extraction, so
-  // it isn't vulnerable to the same character-segmentation failures on dense
-  // tables. Falls straight through to the existing OCR pipeline below on any
+  // Prefer the LLM path when it's configured and supports this bill type. Two modes:
+  //  - Text-based types (credit_card): need a real PDF with extractable text — a
+  //    photo can't capture a multi-page statement, so this path requires pdfText
+  //    up front and shows a clear "upload the PDF" message rather than attempting
+  //    (and failing on) a single-page photo scan.
+  //  - Image-based types (restaurant/grocery/electricity): read the photo directly.
+  // Either way, falls straight through to the existing OCR pipeline below on any
   // failure (network error, endpoint not deployed, model couldn't read it, etc.)
   // so nothing regresses if the backend isn't configured or is temporarily down.
-  if (imageDataUrl && hintedType && isLLMScanSupported(hintedType)) {
-    onProgress({ stepIndex: 1, totalSteps: 4, statusText: 'Reading bill with AI…', subText: `Analysing "${fileName}"` });
-    try {
-      const llmBill = await scanBillWithLLM(imageDataUrl, hintedType);
-      onProgress({ stepIndex: 2, totalSteps: 4, statusText: 'Verifying GST & statutory rules…', subText: 'Cross-checking against Indian consumer law' });
-      await delay(200);
-      onProgress({ stepIndex: 3, totalSteps: 4, statusText: 'Auditing against Indian consumer law…', subText: 'Checking for overcharges & illegal fees' });
-      await delay(200);
-      onProgress({ stepIndex: 4, totalSteps: 4, statusText: 'Generating plain-language breakdown…', subText: 'Almost done' });
-      await delay(200);
-      return { bill: llmBill };
-    } catch (err) {
-      console.warn('LLM scan failed, falling back to OCR pipeline:', err);
+  if (hintedType && isLLMScanSupported(hintedType)) {
+    if (requiresPdfText(hintedType)) {
+      if (!pdfText || pdfText.trim().length < 50) {
+        return { bill: buildPdfRequiredPlaceholder(hintedType) };
+      }
+      onProgress({ stepIndex: 1, totalSteps: 4, statusText: 'Reading statement with AI…', subText: `Analysing "${fileName}" (all pages)` });
+      try {
+        const llmBill = await scanBillTextWithLLM(pdfText, hintedType, imageDataUrl);
+        onProgress({ stepIndex: 2, totalSteps: 4, statusText: 'Verifying rates & statutory rules…', subText: 'Cross-checking against RBI guidelines' });
+        await delay(200);
+        onProgress({ stepIndex: 3, totalSteps: 4, statusText: 'Auditing against Indian consumer law…', subText: 'Checking for hidden charges' });
+        await delay(200);
+        onProgress({ stepIndex: 4, totalSteps: 4, statusText: 'Generating plain-language breakdown…', subText: 'Almost done' });
+        await delay(200);
+        return { bill: llmBill };
+      } catch (err) {
+        console.warn('LLM text scan failed, falling back to regex parsing of the same PDF text:', err);
+        // ocrText below is seeded from this same pdfText, so the regex-based
+        // buildCreditCard() fallback still has real extracted text to work with.
+      }
+    } else if (imageDataUrl) {
+      onProgress({ stepIndex: 1, totalSteps: 4, statusText: 'Reading bill with AI…', subText: `Analysing "${fileName}"` });
+      try {
+        const llmBill = await scanBillWithLLM(imageDataUrl, hintedType);
+        onProgress({ stepIndex: 2, totalSteps: 4, statusText: 'Verifying GST & statutory rules…', subText: 'Cross-checking against Indian consumer law' });
+        await delay(200);
+        onProgress({ stepIndex: 3, totalSteps: 4, statusText: 'Auditing against Indian consumer law…', subText: 'Checking for overcharges & illegal fees' });
+        await delay(200);
+        onProgress({ stepIndex: 4, totalSteps: 4, statusText: 'Generating plain-language breakdown…', subText: 'Almost done' });
+        await delay(200);
+        return { bill: llmBill };
+      } catch (err) {
+        console.warn('LLM scan failed, falling back to OCR pipeline:', err);
+      }
     }
   }
 

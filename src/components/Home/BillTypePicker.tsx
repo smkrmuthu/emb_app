@@ -27,9 +27,8 @@ const BILL_TYPES: { type: BillType; label: string; icon: React.ReactNode; desc: 
     type: 'credit_card',
     label: 'Credit Card / EMI',
     icon: <CreditCard size={20} />,
-    desc: 'HDFC, ICICI, Axis, SBI, Kotak or any bank card',
-    color: '#B33A2E',
-    disabled: true
+    desc: 'PDF statement only (not a photo) — HDFC, ICICI, Axis, SBI, IDFC FIRST, any bank',
+    color: '#B33A2E'
   },
   {
     type: 'grocery',

@@ -801,33 +801,78 @@ function buildGas(raw: string): BillData {
 
 // ─── Credit Card ──────────────────────────────────────────────────────────────
 
+export interface CreditCardParsed {
+  bankName: string;
+  cardNumbers?: string[];
+  statementPeriod?: string;
+  billDate?: string;
+  dueDate?: string;
+  totalAmountDue: number;
+  minimumAmountDue?: number;
+  creditLimit?: number;
+  /** Actual stated APR from the statement, when available — a real, receipt-specific
+   *  rate is far more useful (and honest) than the generic 36-42% range everyone quotes. */
+  aprPercent?: number;
+}
+
+export function buildCreditCardFromParsed(p: CreditCardParsed): BillData {
+  const hasRealAPR = p.aprPercent !== undefined && p.aprPercent > 0;
+  const minDuePct = p.totalAmountDue > 0 && p.minimumAmountDue !== undefined
+    ? Math.round((p.minimumAmountDue / p.totalAmountDue) * 1000) / 10
+    : undefined;
+
+  const flags: BillFlag[] = [
+    hasRealAPR
+      ? { id: 'min', severity: 'danger',
+          title: `⚠ Never Pay Only the Minimum Due — This Card's APR Is ${p.aprPercent}%`,
+          description: `Your statement states an Annual Percentage Rate of ${p.aprPercent}% on revolving balances${minDuePct !== undefined ? ` — paying just the ${minDuePct}% minimum due leaves the rest accruing interest at that rate` : ''}. Always pay the full amount due to avoid it.`,
+          lawCitation: 'RBI – Fair Practice Code for Credit Cards' }
+      : { id: 'min', severity: 'danger',
+          title: '⚠ Never Pay Only the Minimum Due',
+          description: 'Banks typically charge 3–3.5% per month (36–42% effective APR) on revolving balances — this statement doesn\'t print its exact rate, so check your card\'s T&C. Always pay the full amount due.',
+          lawCitation: 'RBI – Fair Practice Code for Credit Cards' },
+    { id: 'emi', severity: 'warning', title: '"No-Cost EMI" Is Not Free', description: 'Processing fee + 18% GST on processing fee makes true APR 8–16%. There is no truly free EMI.', lawCitation: 'RBI Digital Lending Guidelines 2022' }
+  ];
+
+  return {
+    id: `scanned-${Date.now()}`, type: 'credit_card', state: 'national',
+    billerName: p.bankName,
+    categoryLabel: 'Credit Card Statement',
+    billNumber: p.cardNumbers?.length ? p.cardNumbers.join(', ') : '-',
+    billingCycle: p.statementPeriod ?? 'Monthly',
+    billDate: p.billDate ?? todayStr(),
+    dueDate: p.dueDate ?? '-',
+    totalAmount: p.totalAmountDue,
+    summaryPlain: `Total due ₹${p.totalAmountDue.toFixed(2)}.${p.minimumAmountDue !== undefined ? ` Min due ₹${p.minimumAmountDue.toFixed(2)}.` : ''} Always pay full to avoid ${hasRealAPR ? `${p.aprPercent}%` : '36-42%'} effective annual interest.`,
+    lineItems: [
+      ...(p.creditLimit ? [{ id: 'lim', label: 'Credit Limit', amount: p.creditLimit }] : []),
+      { id: 'total', label: 'Total Amount Due', amount: p.totalAmountDue },
+      ...(p.minimumAmountDue !== undefined ? [{ id: 'min', label: 'Minimum Amount Due', amount: p.minimumAmountDue, isSubItem: true, flagSeverity: 'warning' as const, flagMessage: hasRealAPR ? `Paying only minimum accrues interest at ${p.aprPercent}% APR` : 'Paying only minimum triggers 36-42% APR' }] : [])
+    ],
+    flags
+  };
+}
+
 function buildCreditCard(raw: string): BillData {
   const flat = raw.replace(/\n/g, ' ');
   const minDue   = getNum(flat, /minimum\s*(?:amount\s*)?due\s*[₹₨]?\s*([\d,]+\.?\d*)/i);
   const totalDue = getNum(flat, /total\s*(?:amount\s*)?due\s*[₹₨]?\s*([\d,]+\.?\d*)/i)
                 || getNum(flat, /outstanding\s*[₹₨]?\s*([\d,]+\.?\d*)/i);
   const creditLim = getNum(flat, /credit\s*limit\s*[₹₨]?\s*([\d,]+\.?\d*)/i);
+  const cardLast4 = getStr(raw, /card\s*(?:no|number)[.:\s]*(?:xx+)?\s*(\d{4})/i);
+  const apr = getNum(flat, /(?:annual\s*percentage\s*rate|apr)\s*(?:\([^)]*\))?\s*(?:is|of)?\s*[:\s]*([\d.]+)\s*%/i);
 
-  return {
-    id: `scanned-${Date.now()}`, type: 'credit_card', state: 'national',
-    billerName: raw.match(/hdfc|icici|axis|sbi\s*card|kotak|citibank|amex/i)?.[0]?.toUpperCase() ?? 'Credit Card',
-    categoryLabel: 'Credit Card Statement',
-    billNumber: getStr(raw, /card\s*(?:no|number)[.:\s]*(?:xx+)?(\d{4})/i) ?? '-',
-    billingCycle: getStr(flat, /statement\s*period[:\s]*(.+?)(?:\s{2,}|\n|$)/i) ?? 'Monthly',
-    billDate: getStr(flat, /statement\s*date[:\s]*([\d\/\-\.]{6,})/i) ?? todayStr(),
-    dueDate: getStr(flat, /payment\s*due\s*date[:\s]*([\d\/\-\.]{6,})/i) ?? '-',
-    totalAmount: totalDue,
-    summaryPlain: `Total due ₹${totalDue?.toFixed(2) ?? '?'}. Min due ₹${minDue?.toFixed(2) ?? '?'}. Always pay full to avoid 36-42% effective annual interest.`,
-    lineItems: [
-      ...(creditLim ? [{ id: 'lim', label: 'Credit Limit', amount: creditLim }] : []),
-      ...(totalDue ? [{ id: 'total', label: 'Total Amount Due', amount: totalDue }] : []),
-      ...(minDue ? [{ id: 'min', label: 'Minimum Amount Due', amount: minDue, isSubItem: true, flagSeverity: 'warning' as const, flagMessage: 'Paying only minimum triggers 36-42% APR' }] : [])
-    ],
-    flags: [
-      { id: 'min', severity: 'danger', title: '⚠ Never Pay Only the Minimum Due', description: 'Banks charge 3–3.5% per month (36–42% APR) on revolving balances. Always pay the full amount due.', lawCitation: 'RBI – Fair Practice Code for Credit Cards' },
-      { id: 'emi', severity: 'warning', title: '"No-Cost EMI" Is Not Free', description: 'Processing fee + 18% GST on processing fee makes true APR 8–16%. There is no truly free EMI.', lawCitation: 'RBI Digital Lending Guidelines 2022' }
-    ]
-  };
+  return buildCreditCardFromParsed({
+    bankName: raw.match(/hdfc|icici|axis|sbi\s*card|kotak|citibank|amex|idfc\s*first/i)?.[0]?.toUpperCase() ?? 'Credit Card',
+    cardNumbers: cardLast4 ? [cardLast4] : undefined,
+    statementPeriod: getStr(flat, /statement\s*period[:\s]*(.+?)(?:\s{2,}|\n|$)/i),
+    billDate: getStr(flat, /statement\s*date[:\s]*([\d\/\-\.]{6,})/i),
+    dueDate: getStr(flat, /payment\s*due\s*date[:\s]*([\d\/\-\.]{6,})/i),
+    totalAmountDue: totalDue,
+    minimumAmountDue: minDue || undefined,
+    creditLimit: creditLim || undefined,
+    aprPercent: apr || undefined
+  });
 }
 
 // ─── Public dispatcher ────────────────────────────────────────────────────────
@@ -882,6 +927,17 @@ export interface LLMBillExtraction {
   adjustments?: number;
   dueDate?: string;
   billPeriod?: string;
+
+  // Credit Card (text-based extraction, not vision)
+  bankName?: string;
+  cardNumbers?: string[];
+  statementPeriod?: string;
+  statementDate?: string;
+  paymentDueDate?: string;
+  totalAmountDue?: number;
+  minimumAmountDue?: number;
+  creditLimit?: number;
+  aprPercent?: number;
 }
 
 /**
@@ -982,6 +1038,19 @@ export function buildBillFromLLMExtraction(data: LLMBillExtraction, billType: Bi
         dueDate: data.dueDate ?? '-',
         billPeriod: data.billPeriod ?? 'LT Consumption Bill',
         meterNumber: data.meterNumber
+      });
+    }
+    case 'credit_card': {
+      return buildCreditCardFromParsed({
+        bankName: data.bankName ?? 'Credit Card',
+        cardNumbers: data.cardNumbers,
+        statementPeriod: data.statementPeriod,
+        billDate: data.statementDate,
+        dueDate: data.paymentDueDate,
+        totalAmountDue: data.totalAmountDue ?? 0,
+        minimumAmountDue: data.minimumAmountDue,
+        creditLimit: data.creditLimit,
+        aprPercent: data.aprPercent
       });
     }
     default:

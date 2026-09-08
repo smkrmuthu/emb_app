@@ -4,6 +4,14 @@
  * alternative to on-device OCR + regex parsing. Only used when LLM_SCAN_ENDPOINT
  * is configured (empty by default) and the bill type is one it supports —
  * everything else keeps using the existing Tesseract + regex pipeline untouched.
+ *
+ * Two modes:
+ *  - Image (vision): restaurant/grocery/electricity — sends a photo.
+ *  - Text: credit_card — sends the PDF's already-extracted text (every page,
+ *    however many there are) instead of a photo. Credit card statements are
+ *    always multi-page digital PDFs in practice, so reading the text sidesteps
+ *    both the "only page 1 gets rendered" and "one photo per scan" limits that
+ *    a vision-only approach would hit.
  */
 import { BillData, BillType } from '../types/bill';
 import { buildBillFromLLMExtraction, LLMBillExtraction } from './billParser';
@@ -13,10 +21,17 @@ import { buildBillFromLLMExtraction, LLMBillExtraction } from './billParser';
 // the existing OCR pipeline until this is configured.
 export const LLM_SCAN_ENDPOINT = 'https://emb-bill-scanner.smkrmuthu.workers.dev';
 
-const SUPPORTED_TYPES: BillType[] = ['restaurant', 'grocery', 'electricity'];
+const IMAGE_TYPES: BillType[] = ['restaurant', 'grocery', 'electricity'];
+const TEXT_TYPES: BillType[] = ['credit_card'];
 
 export function isLLMScanSupported(billType: BillType): boolean {
-  return Boolean(LLM_SCAN_ENDPOINT) && SUPPORTED_TYPES.includes(billType);
+  return Boolean(LLM_SCAN_ENDPOINT) && (IMAGE_TYPES.includes(billType) || TEXT_TYPES.includes(billType));
+}
+
+/** Credit card (and any future text-based type) needs a real PDF with extractable
+ *  text, not a photo — a camera shot can't reliably capture a multi-page statement. */
+export function requiresPdfText(billType: BillType): boolean {
+  return TEXT_TYPES.includes(billType);
 }
 
 function dataUrlToBase64(dataUrl: string): { base64: string; mediaType: string } {
@@ -27,16 +42,16 @@ function dataUrlToBase64(dataUrl: string): { base64: string; mediaType: string }
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
-async function callScanEndpoint(base64: string, mediaType: string, billType: BillType): Promise<LLMBillExtraction> {
+async function callScanEndpoint(body: Record<string, unknown>): Promise<LLMBillExtraction> {
   const resp = await fetch(LLM_SCAN_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageBase64: base64, mediaType, billType })
+    body: JSON.stringify(body)
   });
 
   if (!resp.ok) {
-    const body = await resp.json().catch(() => null) as { error?: string } | null;
-    throw new Error(body?.error || `LLM scan request failed (HTTP ${resp.status})`);
+    const errBody = await resp.json().catch(() => null) as { error?: string } | null;
+    throw new Error(errBody?.error || `LLM scan request failed (HTTP ${resp.status})`);
   }
 
   return await resp.json() as LLMBillExtraction;
@@ -48,17 +63,11 @@ async function callScanEndpoint(base64: string, mediaType: string, billType: Bil
 // the way back to the OCR fallback for bills where OCR alone can't read the table.
 const MAX_ATTEMPTS = 3;
 
-export async function scanBillWithLLM(imageDataUrl: string, billType: BillType): Promise<BillData> {
-  if (!isLLMScanSupported(billType)) {
-    throw new Error(`LLM scanning is not configured/supported for "${billType}"`);
-  }
-
-  const { base64, mediaType } = dataUrlToBase64(imageDataUrl);
-
+async function withRetries(body: Record<string, unknown>, billType: BillType): Promise<BillData> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const data = await callScanEndpoint(base64, mediaType, billType);
+      const data = await callScanEndpoint(body);
       return buildBillFromLLMExtraction(data, billType);
     } catch (err) {
       lastError = err;
@@ -66,4 +75,33 @@ export async function scanBillWithLLM(imageDataUrl: string, billType: BillType):
     }
   }
   throw lastError instanceof Error ? lastError : new Error('LLM scan failed after retries');
+}
+
+export async function scanBillWithLLM(imageDataUrl: string, billType: BillType): Promise<BillData> {
+  if (!IMAGE_TYPES.includes(billType)) {
+    throw new Error(`Image-based LLM scanning is not configured/supported for "${billType}"`);
+  }
+  const { base64, mediaType } = dataUrlToBase64(imageDataUrl);
+  return withRetries({ imageBase64: base64, mediaType, billType }, billType);
+}
+
+export async function scanBillTextWithLLM(pdfText: string, billType: BillType, pageImageDataUrl?: string): Promise<BillData> {
+  if (!TEXT_TYPES.includes(billType)) {
+    throw new Error(`Text-based LLM scanning is not configured/supported for "${billType}"`);
+  }
+  const body: Record<string, unknown> = { pdfText, billType };
+  // Page 1 is typically the visual "summary" page — including it lets the model
+  // cross-check headline numbers (Total Due, Min Due, etc.) against their actual
+  // visual layout, which linearized text can't reliably preserve for a tile/card
+  // style summary section.
+  if (pageImageDataUrl) {
+    try {
+      const { base64, mediaType } = dataUrlToBase64(pageImageDataUrl);
+      body.imageBase64 = base64;
+      body.mediaType = mediaType;
+    } catch {
+      // Not a usable image — proceed with text only, no worse than before.
+    }
+  }
+  return withRetries(body, billType);
 }

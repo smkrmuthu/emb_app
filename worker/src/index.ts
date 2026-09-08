@@ -71,15 +71,37 @@ const ElectricitySchema = z.object({
   grandTotal: z.number()
 });
 
-const SCHEMAS = {
+const CreditCardSchema = z.object({
+  bankName: z.string(),
+  cardNumbers: z.array(z.string()).nullable(),
+  statementPeriod: z.string().nullable(),
+  statementDate: z.string().nullable(),
+  paymentDueDate: z.string().nullable(),
+  totalAmountDue: z.number(),
+  minimumAmountDue: z.number().nullable(),
+  creditLimit: z.number().nullable(),
+  aprPercent: z.number().nullable()
+});
+
+// Bill types read directly from a photo (vision)
+const IMAGE_SCHEMAS = {
   restaurant: RestaurantSchema,
   grocery: GrocerySchema,
   electricity: ElectricitySchema
 } as const;
 
+// Bill types read from extracted PDF text — no photo involved at all
+const TEXT_SCHEMAS = {
+  credit_card: CreditCardSchema
+} as const;
+
+const SCHEMAS = { ...IMAGE_SCHEMAS, ...TEXT_SCHEMAS } as const;
+
+type ImageBillType = keyof typeof IMAGE_SCHEMAS;
+type TextBillType = keyof typeof TEXT_SCHEMAS;
 type SupportedBillType = keyof typeof SCHEMAS;
 
-const PROMPTS: Record<SupportedBillType, string> = {
+const IMAGE_PROMPTS: Record<ImageBillType, string> = {
   restaurant: `Read this photo of an Indian restaurant bill/receipt precisely and extract the fields in the given schema.
 Rules:
 - Read every number exactly as printed — never estimate, round, or invent a value you can't actually see.
@@ -112,6 +134,20 @@ Rules:
 - If a field genuinely isn't printed on the bill or isn't legible, use null rather than guessing.`
 };
 
+const TEXT_PROMPTS: Record<TextBillType, string> = {
+  credit_card: `Below is the full extracted text of an Indian credit card statement PDF (every page included, in order). Extract the fields in the given schema.
+Rules:
+- Read every number exactly as it appears in the text — never estimate or invent a value that isn't there.
+- bankName is the issuing bank (e.g. "IDFC FIRST Bank", "HDFC Bank"), not the cardholder's name.
+- cardNumbers is every masked card number mentioned (e.g. "XXXX 5323") — a consolidated statement can cover more than one card; list them all. Null if none is legible.
+- totalAmountDue is the full "Total Amount Due" for the statement — this is required.
+- minimumAmountDue is the "Minimum Amount Due"/"Min Amount Due".
+- creditLimit is the total credit limit (not "Available Credit Limit" — the full sanctioned limit).
+- aprPercent is the actual stated "Annual Percentage Rate (APR)" or interest rate percentage if the statement prints one (e.g. 28.00 for "28.00%") — this is often stated explicitly; only use null if genuinely not mentioned anywhere in the text, never guess a typical/generic rate.
+- statementPeriod is the billing cycle dates (e.g. "18/Jul/2026 - 17/Aug/2026"). statementDate is when the statement was generated, if separately stated. paymentDueDate is the due date for payment.
+- If a field genuinely isn't present in the text, use null rather than guessing.`
+};
+
 function corsHeaders(origin: string): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin,
@@ -139,24 +175,54 @@ export default {
       return json({ error: 'Method not allowed' }, 405, origin);
     }
 
-    let body: { imageBase64?: string; mediaType?: string; billType?: string };
+    let body: { imageBase64?: string; mediaType?: string; billType?: string; pdfText?: string };
     try {
       body = await request.json();
     } catch {
       return json({ error: 'Invalid JSON body' }, 400, origin);
     }
 
-    const { imageBase64, mediaType, billType } = body;
-    if (!imageBase64 || !mediaType || !billType) {
-      return json({ error: 'imageBase64, mediaType, and billType are required' }, 400, origin);
+    const { imageBase64, mediaType, billType, pdfText } = body;
+    if (!billType) {
+      return json({ error: 'billType is required' }, 400, origin);
     }
 
     const schema = SCHEMAS[billType as SupportedBillType];
     if (!schema) {
       return json({ error: `Unsupported billType "${billType}" — this endpoint currently handles: ${Object.keys(SCHEMAS).join(', ')}` }, 400, origin);
     }
-    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mediaType)) {
-      return json({ error: `Unsupported mediaType "${mediaType}"` }, 400, origin);
+
+    const isTextType = billType in TEXT_SCHEMAS;
+
+    let content: Anthropic.Messages.ContentBlockParam[];
+    if (isTextType) {
+      if (!pdfText || pdfText.trim().length < 50) {
+        return json({ error: 'pdfText is required for this bill type (upload the PDF statement, not a photo)' }, 400, origin);
+      }
+      content = [{ type: 'text', text: `${TEXT_PROMPTS[billType as TextBillType]}\n\n--- STATEMENT TEXT (all pages) ---\n\n${pdfText}` }];
+      // Page 1 is usually the visual "summary" page (Total Due, Min Due, Credit
+      // Limit, Due Date) laid out as dashboard tiles — text extraction linearizes
+      // that layout and can pair the wrong label with the wrong value, since
+      // reading order doesn't reliably follow visual position for a tile grid.
+      // Including the rendered image too lets the model cross-check those specific
+      // headline numbers against their actual visual layout.
+      if (imageBase64 && mediaType && ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mediaType)) {
+        content.push(
+          { type: 'text', text: 'Here is an image of page 1 of the same statement — cross-check the summary numbers (Total Amount Due, Minimum Amount Due, Credit Limit, Payment Due Date) against it, since their exact label-value pairing is clearer visually than in the linearized text above.' },
+          { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: imageBase64 } }
+        );
+      }
+    } else {
+      if (!imageBase64 || !mediaType) {
+        return json({ error: 'imageBase64 and mediaType are required for this bill type' }, 400, origin);
+      }
+      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mediaType)) {
+        return json({ error: `Unsupported mediaType "${mediaType}"` }, 400, origin);
+      }
+      content = [
+        { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: imageBase64 } },
+        { type: 'text', text: IMAGE_PROMPTS[billType as ImageBillType] }
+      ];
     }
 
     if (!env.ANTHROPIC_API_KEY) {
@@ -169,21 +235,12 @@ export default {
       const response = await client.messages.parse({
         model: 'claude-haiku-4-5',
         max_tokens: 4096,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif', data: imageBase64 }
-            },
-            { type: 'text', text: PROMPTS[billType as SupportedBillType] }
-          ]
-        }],
+        messages: [{ role: 'user', content }],
         output_config: { format: zodOutputFormat(schema) }
       });
 
       if (!response.parsed_output) {
-        return json({ error: 'Could not extract a usable result from this photo — it may be too unclear.' }, 422, origin);
+        return json({ error: 'Could not extract a usable result — it may be too unclear or an unrecognized format.' }, 422, origin);
       }
 
       return json(response.parsed_output, 200, origin);

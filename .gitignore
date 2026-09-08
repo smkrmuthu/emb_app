@@ -27,6 +27,9 @@ dist-ssr
 *.jpg
 *.jpeg
 *.png
+# Real bill photos/PDFs used for local testing carry personal data — never commit
+# them. Pre-existing tracked PDFs (e.g. ExplainMyBill_Phase1.pdf) are unaffected.
+*.pdf
 
 # Cloudflare Worker local state / secrets
 .wrangler

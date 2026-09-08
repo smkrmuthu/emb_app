@@ -45,6 +45,7 @@ export const App: React.FC = () => {
   const [pendingUpload, setPendingUpload] = useState<{
     fileName: string;
     fileUrl?: string;
+    pdfText?: string;
   } | null>(null);
 
   const [disputeModal, setDisputeModal] = useState<{
@@ -110,7 +111,9 @@ export const App: React.FC = () => {
 
     // Detect type from filename or pdfText
     const detected = detectBillTypeFromFilename(fileName)
-      ?? (pdfText ? (pdfText.match(/tangedco|electricity|current\s*consumption/i) ? 'electricity' : null) : null);
+      ?? (pdfText ? (pdfText.match(/tangedco|electricity|current\s*consumption/i) ? 'electricity'
+          : pdfText.match(/total\s*amount\s*due|minimum\s*amount\s*due|credit\s*card\s*statement/i) ? 'credit_card'
+          : null) : null);
 
     if (fileUrl || pdfText) {
       if (detected) {
@@ -118,7 +121,9 @@ export const App: React.FC = () => {
         runRealScan(fileName, fileUrl, detected, pdfText);
       } else {
         // Doubtful / generic filename → ASK THE USER TO SELECT TYPE
-        setPendingUpload({ fileName, fileUrl });
+        // (carry pdfText through so a manually-picked text-only type, e.g. credit
+        // card, still has the already-extracted PDF text once the type is chosen)
+        setPendingUpload({ fileName, fileUrl, pdfText });
       }
       return;
     }
@@ -136,12 +141,12 @@ export const App: React.FC = () => {
       return;
     }
 
-    const { fileName, fileUrl } = pendingUpload;
+    const { fileName, fileUrl, pdfText } = pendingUpload;
     setPendingUpload(null);
 
-    if (fileUrl) {
-      // We have the image — run real OCR with user-selected type
-      runRealScan(fileName, fileUrl, type);
+    if (fileUrl || pdfText) {
+      // We have the image and/or extracted PDF text — run real scan with user-selected type
+      runRealScan(fileName, fileUrl, type, pdfText);
     } else {
       // PDF or non-image: show animated scan & best sample for selected type
       setIsScanning(true);
