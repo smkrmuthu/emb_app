@@ -3,8 +3,8 @@
  * Handles OCR noise: collapsed whitespace, split lines, symbol garbling.
  */
 
-import { BillData, BillFlag, BillType, GSTDetails, LineItem } from '../types/bill';
-import { calculateMinimumDueTrap } from './billAnalyzer';
+import { BillData, BillFlag, BillType, GSTDetails, IndianState, LineItem } from '../types/bill';
+import { calculateEBTariff, calculateMinimumDueTrap } from './billAnalyzer';
 
 // ─── Generic helpers ─────────────────────────────────────────────────────────
 
@@ -542,13 +542,40 @@ export interface ElectricityParsed {
   dueDate: string;
   billPeriod: string;
   meterNumber?: string;
+  /** Printed category text, e.g. "Domestic" / "Non-Domestic" / "Cat 1A Domestic" — used to
+   *  decide whether the domestic slab-savings model applies at all (commercial/industrial
+   *  connections are billed on a completely different, non-slab tariff). */
+  category?: string;
+  contractedLoadKW?: number;
+  phase?: 1 | 3;
+  /** Extra flat charges seen on Telangana-style bills — read and shown as-is, never
+   *  independently recomputed (no official simple formula for these ancillary items). */
+  customerCharges?: number;
+  interestOnED?: number;
+  surcharge?: number;
+  acdSurcharge?: number;
+  fsaFcaCharges?: number;
+  interestOnSD?: number;
+  lossGain?: number;
+  arrears?: number;
+}
+
+/** Maps a detected discom name to the state whose tariff rules apply. Falls back to
+ *  Tamil Nadu only when nothing else matches, to preserve existing behaviour for bills
+ *  where the discom genuinely couldn't be read. */
+function detectStateFromDiscom(discom: string): IndianState {
+  const d = discom.toLowerCase();
+  if (/kseb/.test(d)) return 'kerala';
+  if (/tgspdcl|tgnpdcl|tsspdcl|tsnpdcl/.test(d)) return 'telangana';
+  return 'tamil_nadu';
 }
 
 function parseElectricity(raw: string): ElectricityParsed {
   const flat = raw.replace(/\n/g, ' ');
 
-  // DISCOM detection
-  const discom = raw.match(/tangedco|tnpdcl|kseb|tsspdcl|tsnpdcl|bescom|msedcl/i)?.[0]?.toUpperCase() ?? 'TNPDCL — TANGEDCO';
+  // DISCOM detection — TGSPDCL/TGNPDCL are the real current Telangana discom names
+  // (older bills/documents sometimes still say TSSPDCL/TSNPDCL, kept for compatibility).
+  const discom = raw.match(/tangedco|tnpdcl|kseb|tgspdcl|tgnpdcl|tsspdcl|tsnpdcl|bescom|msedcl/i)?.[0]?.toUpperCase() ?? 'TNPDCL — TANGEDCO';
 
   // Consumer & Connection details
   const serviceConn = getStr(raw, /(?:service\s*connection|servie\s*connection|consumer\s*no)[^0-9]*([0-9\-]+)/i)
@@ -573,14 +600,20 @@ function parseElectricity(raw: string): ElectricityParsed {
     else if (diff > 0 && diff < 5000) units = diff;
   }
   if (!units) {
-    // Fallback: an explicit "NNN units" mention elsewhere on the bill
-    const m = flat.match(/\b(\d{1,4})\s*units\b/i);
-    if (m) {
-      const val = parseFloat(m[1]);
-      if (val > 0 && val < 5000) units = val;
-    }
+    // Fallback: an explicit "Units: NNN" label (Telangana bills print this directly
+    // rather than a combined reading row) or an "NNN units" mention elsewhere.
+    const labelled = flat.match(/\bunits\s*[:\-]\s*(\d{1,4})\b/i);
+    const trailing = flat.match(/\b(\d{1,4})\s*units\b/i);
+    const val = parseFloat((labelled ?? trailing)?.[1] ?? '');
+    if (val > 0 && val < 5000) units = val;
   }
   const consumedUnits = Math.round(units);
+
+  // Category (Domestic vs Non-Domestic/Commercial) — determines whether the domestic
+  // slab-savings model applies at all; e.g. "Cat 1A Domestic", "Cat: 2(B) Non-Domestic".
+  const category = getStr(raw, /cat[.:]?\s*[\dA-Z()]*\s*(non[\s\-]?domestic|domestic)/i);
+  const contractedLoadKW = getNum(flat, /contracted\s*load[^\d]*(\d+(?:\.\d+)?)/i) || undefined;
+  const phase: 1 | 3 | undefined = /ph[.:]?\s*3\b/i.test(flat) ? 3 : /ph[.:]?\s*1\b/i.test(flat) ? 1 : undefined;
 
   // 2. Bill Total Amount (Net Payable) — strictly exclude year numbers (2020–2030)
   let total = 0;
@@ -611,6 +644,16 @@ function parseElectricity(raw: string): ElectricityParsed {
   const adjustments   = moneyAfter(/adjustments/i);
   const roundOff       = getNum(flat, /round\s*off[^\d]*(-?[\d,]+\.?\d*)/i);
 
+  // Telangana-style flat charges — read and shown as-is, never independently recomputed.
+  const customerCharges = moneyAfter(/customer\s*charges/i) || undefined;
+  const interestOnED    = moneyAfter(/interest\s*on\s*ed\b/i) || undefined;
+  const surcharge       = moneyAfter(/\bsurcharge\b(?!\s*charges)/i) || undefined;
+  const acdSurcharge    = moneyAfter(/acd\s*surcharge/i) || undefined;
+  const fsaFcaCharges   = moneyAfter(/fsa\s*\/?\s*fca\s*charges/i) || undefined;
+  const interestOnSD    = moneyAfter(/interest\s*on\s*sd\b/i) || undefined;
+  const lossGain        = getNum(flat, /loss\s*\/\s*gain[^\d\-]*(-?[\d,]+\.?\d*)/i) || undefined;
+  const arrears         = moneyAfter(/total\s*due/i) > total ? moneyAfter(/total\s*due/i) - total : undefined;
+
   // Fallback total computation from energy charges - subsidy if the total label wasn't found.
   // If neither this nor the label search above found anything, leave total at 0 — the
   // caller's low-quality fallback handles an unreadable bill rather than us guessing a number.
@@ -626,14 +669,46 @@ function parseElectricity(raw: string): ElectricityParsed {
   return {
     discom, serviceConn, consumerName, consumedUnits, total,
     energyCharges, govtSubsidy, adjustments, roundOff, dueDate, billPeriod,
-    meterNumber: getStr(raw, /meter\s*no[^\d]*(\d+)/i)
+    meterNumber: getStr(raw, /meter\s*no[^\d]*(\d+)/i),
+    category, contractedLoadKW, phase,
+    customerCharges, interestOnED, surcharge, acdSurcharge, fsaFcaCharges, interestOnSD, lossGain, arrears
   };
 }
 
-export function buildElectricityFromParsed(p: ElectricityParsed): BillData {
-  const { discom, serviceConn, consumerName, consumedUnits, total, energyCharges, govtSubsidy, adjustments, roundOff, dueDate, billPeriod, meterNumber } = p;
+function isNonDomestic(category?: string): boolean {
+  return !!category && /non/i.test(category);
+}
 
-  // Calculate TANGEDCO Telescopic Slabs for consumedUnits
+/** Shared line-item builder — every extra field is only shown if actually present,
+ *  so this renders identically to before for bills that don't have them (e.g. TN). */
+function buildElectricityLineItems(p: ElectricityParsed): LineItem[] {
+  const { energyCharges, govtSubsidy, adjustments, roundOff, consumedUnits, total,
+    customerCharges, interestOnED, surcharge, acdSurcharge, fsaFcaCharges, interestOnSD, lossGain, arrears } = p;
+  let idx = 0;
+  const next = () => String(++idx);
+  const items: LineItem[] = [];
+  items.push(energyCharges > 0
+    ? { id: next(), label: `Energy Charges (${consumedUnits} units consumed)`, amount: energyCharges }
+    : { id: next(), label: `Consumed Units: ${consumedUnits} kWh`, amount: total });
+  if (customerCharges) items.push({ id: next(), label: 'Customer Charges', amount: customerCharges, isSubItem: true });
+  if (govtSubsidy > 0) items.push({ id: next(), label: 'Govt Subsidy Exemption', amount: -govtSubsidy });
+  if (interestOnED) items.push({ id: next(), label: 'Interest on Electricity Duty', amount: interestOnED, isSubItem: true });
+  if (surcharge) items.push({ id: next(), label: 'Surcharge', amount: surcharge, isSubItem: true });
+  if (acdSurcharge) items.push({ id: next(), label: 'ACD Surcharge', amount: acdSurcharge, isSubItem: true });
+  if (fsaFcaCharges) items.push({ id: next(), label: 'FSA/FCA Charges', amount: fsaFcaCharges, isSubItem: true });
+  if (interestOnSD) items.push({ id: next(), label: 'Interest on Security Deposit', amount: interestOnSD, isSubItem: true });
+  if (adjustments > 0) items.push({ id: next(), label: 'Prior Adjustments / SD', amount: -adjustments });
+  if (lossGain) items.push({ id: next(), label: 'Loss/Gain', amount: lossGain, isSubItem: true });
+  if (roundOff !== 0) items.push({ id: next(), label: 'Round off', amount: roundOff, isSubItem: true });
+  if (arrears) items.push({ id: next(), label: 'Arrears', amount: arrears });
+  items.push({ id: 'total', label: 'Net Amount Payable', amount: total });
+  return items;
+}
+
+function buildTamilNaduElectricity(p: ElectricityParsed): BillData {
+  const { discom, serviceConn, consumerName, consumedUnits, total, govtSubsidy, dueDate, billPeriod, meterNumber } = p;
+
+  // TANGEDCO Telescopic Slabs for consumedUnits
   // Slabs: 0-100 (Free), 101-200 (@ ₹2.35), 201-400 (@ ₹4.95), 401-500 (@ ₹6.80), 501+ (@ ₹8.40)
   const slabBreakdown = [
     { slabRange: '0–100 units (Govt Subsidy)', unitsCharged: Math.min(consumedUnits, 100), ratePerUnit: 0, totalCost: 0, isFree: true },
@@ -645,14 +720,6 @@ export function buildElectricityFromParsed(p: ElectricityParsed): BillData {
 
   const excessUnits = Math.max(0, consumedUnits - 500);
   const displayName = consumerName ? `${discom} (${consumerName.trim()})` : `${discom} — Electricity Bill`;
-
-  const lineItems: LineItem[] = [
-    ...(energyCharges > 0 ? [{ id: '1', label: `Energy Charges (${consumedUnits} units consumed)`, amount: energyCharges }] : [{ id: '1', label: `Consumed Units: ${consumedUnits} kWh`, amount: total }]),
-    ...(govtSubsidy > 0 ? [{ id: '2', label: 'Govt Subsidy Exemption', amount: -govtSubsidy }] : []),
-    ...(adjustments > 0 ? [{ id: '3', label: 'Prior Adjustments / SD', amount: -adjustments }] : []),
-    ...(roundOff !== 0 ? [{ id: '4', label: 'Round off', amount: roundOff, isSubItem: true }] : []),
-    { id: 'total', label: 'Net Amount Payable', amount: total }
-  ];
 
   return {
     id: `scanned-${Date.now()}`,
@@ -668,7 +735,7 @@ export function buildElectricityFromParsed(p: ElectricityParsed): BillData {
     summaryPlain: consumedUnits > 0
       ? `TANGEDCO bi-monthly residential bill for ${consumedUnits} units. ${excessUnits > 0 ? `You crossed into the highest slab (501+ units) by ${excessUnits} units.` : 'Within subsidised slab limits (under 500 units).'}${govtSubsidy > 0 ? ` Govt subsidy applied: -₹${govtSubsidy.toFixed(2)}.` : ''} Net payable: ₹${total.toLocaleString('en-IN')}.`
       : `TANGEDCO bi-monthly residential bill. Units consumed could not be read clearly.${govtSubsidy > 0 ? ` Govt subsidy applied: -₹${govtSubsidy.toFixed(2)}.` : ''} Net payable: ₹${total.toLocaleString('en-IN')}.`,
-    lineItems,
+    lineItems: buildElectricityLineItems(p),
     ebDetails: {
       state: 'tamil_nadu',
       discomName: discom,
@@ -728,6 +795,108 @@ export function buildElectricityFromParsed(p: ElectricityParsed): BillData {
       }] : [])
     ]
   };
+}
+
+/** Domestic Telangana/Kerala bills — uses the same calculateEBTariff() the interactive
+ *  What-If Simulator uses, so the initial scan result and the slider agree with each
+ *  other, and both are built on the same verified official tariff tables. */
+function buildStateDomesticElectricity(p: ElectricityParsed, state: 'telangana' | 'kerala'): BillData {
+  const { discom, serviceConn, consumerName, consumedUnits, total, dueDate, billPeriod, meterNumber, contractedLoadKW, phase } = p;
+  const calculated = calculateEBTariff(state, consumedUnits, contractedLoadKW, phase);
+  const displayName = consumerName ? `${discom} (${consumerName.trim()})` : `${discom} — Electricity Bill`;
+  const regulator = state === 'telangana' ? 'TGERC' : 'KSERC';
+  const citation = state === 'telangana'
+    ? 'TGERC Retail Supply Tariff Order, Table 2-51 (FY 2025-26, retained for FY 2026-27)'
+    : 'KSERC Schedule of Tariff for Retail Supply (01.04.2025–31.03.2027)';
+
+  return {
+    id: `scanned-${Date.now()}`,
+    type: 'electricity',
+    state,
+    billerName: displayName,
+    categoryLabel: 'Electricity Bill',
+    billNumber: serviceConn ? `Conn: ${serviceConn}` : 'LT Consumption Bill',
+    billingCycle: billPeriod,
+    billDate: todayStr(),
+    dueDate,
+    totalAmount: total,
+    summaryPlain: consumedUnits > 0
+      ? `${discom} domestic bill for ${consumedUnits} units. ${calculated.nextSlabThreshold ? calculated.nextSlabThreshold.tip : 'Within the lowest tariff category for this cycle.'} Net payable: ₹${total.toLocaleString('en-IN')}.`
+      : `${discom} domestic bill. Units consumed could not be read clearly. Net payable: ₹${total.toLocaleString('en-IN')}.`,
+    lineItems: buildElectricityLineItems(p),
+    ebDetails: { ...calculated, meterNumber: meterNumber ?? calculated.meterNumber },
+    flags: [
+      ...(consumedUnits === 0 ? [{
+        id: 'ocr-low-quality' as const,
+        severity: 'warning' as const,
+        title: '⚠ Units Consumed Unclear — Retake for Full Breakdown',
+        description: 'We could read the bill amount but not the units consumed clearly. For an accurate slab-by-slab breakdown, please retake a sharper photo/scan in good light or re-upload the original.',
+        lawCitation: ''
+      }] : []),
+      ...(consumedUnits === 0 ? [] : [calculated.nextSlabThreshold
+        ? {
+            id: 'flag-eb-slab-jump' as const,
+            severity: 'danger' as const,
+            title: `⚠ Category Jump — Re-rated at ${consumedUnits} Units`,
+            description: calculated.nextSlabThreshold.tip,
+            savingsPotential: calculated.nextSlabThreshold.potentialSavings,
+            lawCitation: citation
+          }
+        : {
+            id: 'flag-eb-normal' as const,
+            severity: 'good' as const,
+            title: `✓ Consumption (${consumedUnits} Units) in the Lowest Tariff Category`,
+            description: `Total consumption of ${consumedUnits} units keeps you in the cheapest ${regulator} domestic tariff category for this cycle.`,
+            lawCitation: citation
+          }]),
+      {
+        id: 'flag-eb-no-gst',
+        severity: 'good',
+        title: '✓ Electricity Supply is Exempt from GST (0% GST)',
+        description: `Under Indian tax law, domestic electricity consumption is exempt from GST. Bills are governed by ${regulator} tariff slabs, not restaurant GST.`,
+        lawCitation: 'CBIC Notification No. 12/2017 – Central Tax (Rate)'
+      }
+    ]
+  };
+}
+
+/** Non-domestic bills (commercial/industrial) and any state we don't have a verified
+ *  slab model for yet — read and show the real charges accurately without inventing
+ *  a slab-savings claim we can't back with an official source. */
+function buildGenericElectricity(p: ElectricityParsed, state: IndianState): BillData {
+  const { discom, serviceConn, consumerName, consumedUnits, total, dueDate, billPeriod, category } = p;
+  const displayName = consumerName ? `${discom} (${consumerName.trim()})` : `${discom} — Electricity Bill`;
+
+  return {
+    id: `scanned-${Date.now()}`,
+    type: 'electricity',
+    state,
+    billerName: displayName,
+    categoryLabel: category ? `Electricity Bill — ${category}` : 'Electricity Bill',
+    billNumber: serviceConn ? `Conn: ${serviceConn}` : 'LT Consumption Bill',
+    billingCycle: billPeriod,
+    billDate: todayStr(),
+    dueDate,
+    totalAmount: total,
+    summaryPlain: `${discom}${category ? ` (${category})` : ''} bill${consumedUnits > 0 ? ` for ${consumedUnits} units` : ''}. Net payable: ₹${total.toLocaleString('en-IN')}.`,
+    lineItems: buildElectricityLineItems(p),
+    flags: [
+      {
+        id: 'flag-eb-no-gst',
+        severity: 'good',
+        title: '✓ Electricity Supply is Exempt from GST (0% GST)',
+        description: 'Under Indian tax law, electricity consumption is exempt from GST.',
+        lawCitation: 'CBIC Notification No. 12/2017 – Central Tax (Rate)'
+      }
+    ]
+  };
+}
+
+export function buildElectricityFromParsed(p: ElectricityParsed): BillData {
+  const state = detectStateFromDiscom(p.discom);
+  if (isNonDomestic(p.category)) return buildGenericElectricity(p, state);
+  if (state === 'telangana' || state === 'kerala') return buildStateDomesticElectricity(p, state);
+  return buildTamilNaduElectricity(p);
 }
 
 function buildElectricity(raw: string): BillData {
@@ -952,6 +1121,19 @@ export interface LLMBillExtraction {
   adjustments?: number;
   dueDate?: string;
   billPeriod?: string;
+  /** Printed category, e.g. "Domestic" / "Non-Domestic" — decides whether the domestic
+   *  slab-savings model applies at all. */
+  category?: string;
+  contractedLoadKW?: number;
+  phase?: 1 | 3;
+  customerCharges?: number;
+  interestOnED?: number;
+  surcharge?: number;
+  acdSurcharge?: number;
+  fsaFcaCharges?: number;
+  interestOnSD?: number;
+  lossGain?: number;
+  arrears?: number;
 
   // Credit Card (text-based extraction, not vision)
   bankName?: string;
@@ -1062,7 +1244,18 @@ export function buildBillFromLLMExtraction(data: LLMBillExtraction, billType: Bi
         roundOff: data.roundOff ?? 0,
         dueDate: data.dueDate ?? '-',
         billPeriod: data.billPeriod ?? 'LT Consumption Bill',
-        meterNumber: data.meterNumber
+        meterNumber: data.meterNumber,
+        category: data.category,
+        contractedLoadKW: data.contractedLoadKW,
+        phase: data.phase,
+        customerCharges: data.customerCharges,
+        interestOnED: data.interestOnED,
+        surcharge: data.surcharge,
+        acdSurcharge: data.acdSurcharge,
+        fsaFcaCharges: data.fsaFcaCharges,
+        interestOnSD: data.interestOnSD,
+        lossGain: data.lossGain,
+        arrears: data.arrears
       });
     }
     case 'credit_card': {

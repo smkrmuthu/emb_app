@@ -4,11 +4,16 @@ import { EB_TARIFF_DATA } from '../data/tariffData';
 /**
  * Dynamically computes Tamil Nadu, Kerala, or Telangana electricity bill breakdown.
  */
-export function calculateEBTariff(state: IndianState, units: number): EBDetails {
+export function calculateEBTariff(
+  state: IndianState,
+  units: number,
+  contractedLoadKW?: number,
+  phase?: 1 | 3
+): EBDetails {
   if (state === 'kerala') {
-    return calculateKeralaEB(units);
+    return calculateKeralaEB(units, phase ?? 1);
   } else if (state === 'telangana') {
-    return calculateTelanganaEB(units);
+    return calculateTelanganaEB(units, contractedLoadKW ?? 1);
   } else {
     return calculateTamilNaduEB(units);
   }
@@ -135,63 +140,91 @@ function calculateTamilNaduEB(units: number): EBDetails {
   };
 }
 
-function calculateKeralaEB(units: number): EBDetails {
+// KSERC Schedule of Tariff for LT-I Domestic, effective 01.04.2025 to 31.03.2027
+// (verified against the official Gazette order, cross-checked against a real KSEB
+// bill's Electricity Duty figure). Telescopic up to 250 units; above that, Kerala
+// switches to a single FLAT rate on every unit — which of five flat rates applies
+// depends on which band the TOTAL monthly consumption falls into.
+const KERALA_TELESCOPIC = [
+  { upTo: 50, rate: 3.35, color: '#2E6E4E' },
+  { upTo: 100, rate: 4.25, color: '#429367' },
+  { upTo: 150, rate: 5.35, color: '#A9812E' },
+  { upTo: 200, rate: 7.20, color: '#D97706' },
+  { upTo: 250, rate: 8.50, color: '#B33A2E' }
+];
+const KERALA_FLAT_BANDS = [
+  { upTo: 300, rate: 6.75, fixedSingle: 220, fixedThree: 240 },
+  { upTo: 350, rate: 7.60, fixedSingle: 240, fixedThree: 250 },
+  { upTo: 400, rate: 7.95, fixedSingle: 260, fixedThree: 260 },
+  { upTo: 500, rate: 8.25, fixedSingle: 285, fixedThree: 285 },
+  { upTo: Infinity, rate: 9.20, fixedSingle: 310, fixedThree: 310 }
+];
+const KERALA_TELESCOPIC_FIXED = [
+  { upTo: 50, single: 50, three: 130 },
+  { upTo: 100, single: 85, three: 175 },
+  { upTo: 150, single: 105, three: 205 },
+  { upTo: 200, single: 140, three: 215 },
+  { upTo: 250, single: 160, three: 235 }
+];
+
+function telescopicCost(units: number, slabs: { upTo: number; rate: number }[]): number {
+  let total = 0;
+  let lower = 0;
+  for (const slab of slabs) {
+    const unitsInSlab = Math.min(units, slab.upTo) - lower;
+    if (unitsInSlab > 0) total += unitsInSlab * slab.rate;
+    lower = slab.upTo;
+  }
+  return Math.round(total);
+}
+
+function calculateKeralaEB(units: number, phase: 1 | 3 = 1): EBDetails {
   const slabBreakdown: EBSlabItem[] = [];
   let energyTotal = 0;
+  let nextSlabThreshold;
+  let fixedCharges: number;
 
   if (units <= 250) {
-    // Telescopic slabs up to 250 units
-    let remaining = units;
-    const slabs = [
-      { range: '0–50 units', cap: 50, rate: 3.25, color: '#2E6E4E' },
-      { range: '51–100 units', cap: 50, rate: 4.05, color: '#429367' },
-      { range: '101–150 units', cap: 50, rate: 5.10, color: '#A9812E' },
-      { range: '151–200 units', cap: 50, rate: 6.80, color: '#D97706' },
-      { range: '201–250 units', cap: 50, rate: 8.00, color: '#B33A2E' }
-    ];
-
-    for (const slab of slabs) {
-      if (remaining <= 0) break;
-      const count = Math.min(remaining, slab.cap);
-      const cost = Math.round(count * slab.rate);
+    let lower = 0;
+    for (const slab of KERALA_TELESCOPIC) {
+      if (units <= lower) break;
+      const unitsInSlab = Math.min(units, slab.upTo) - lower;
+      if (unitsInSlab <= 0) { lower = slab.upTo; continue; }
+      const cost = Math.round(unitsInSlab * slab.rate);
       energyTotal += cost;
       slabBreakdown.push({
-        slabRange: slab.range,
-        unitsCharged: count,
+        slabRange: `${lower + 1}–${Math.min(units, slab.upTo)} units`,
+        unitsCharged: unitsInSlab,
         ratePerUnit: slab.rate,
         totalCost: cost,
         colorHex: slab.color
       });
-      remaining -= count;
+      lower = slab.upTo;
     }
+    const bracket = KERALA_TELESCOPIC_FIXED.find(b => units <= b.upTo) ?? KERALA_TELESCOPIC_FIXED[KERALA_TELESCOPIC_FIXED.length - 1];
+    fixedCharges = phase === 3 ? bracket.three : bracket.single;
   } else {
-    // Non-telescopic penalty: all units billed at flat rate!
-    const rate = 9.15;
-    energyTotal = Math.round(units * rate);
+    // Non-telescopic: crossing 250 units re-rates EVERY unit at one flat rate —
+    // a much sharper cliff than a normal telescopic slab jump.
+    const band = KERALA_FLAT_BANDS.find(b => units <= b.upTo) ?? KERALA_FLAT_BANDS[KERALA_FLAT_BANDS.length - 1];
+    energyTotal = Math.round(units * band.rate);
     slabBreakdown.push({
-      slabRange: `All Units (0–${units} @ ₹${rate} Non-Telescopic)`,
+      slabRange: `All ${units} units @ ₹${band.rate.toFixed(2)} (Non-Telescopic)`,
       unitsCharged: units,
-      ratePerUnit: rate,
+      ratePerUnit: band.rate,
       totalCost: energyTotal,
       colorHex: '#B33A2E'
     });
-  }
+    fixedCharges = phase === 3 ? band.fixedThree : band.fixedSingle;
 
-  const fixedCharges = units > 250 ? 160 : 100;
-  const electricityDuty = Math.round(energyTotal * 0.10);
-  const fuelSurcharge = Math.round(units * 0.19);
-
-  let nextSlabThreshold;
-  if (units > 250) {
-    const excess = units - 250;
-    const normalCostAt250 = 1315; // sum of 250 telescopic
-    const potentialSavings = energyTotal - normalCostAt250;
+    const cappedCost = telescopicCost(250, KERALA_TELESCOPIC);
+    const potentialSavings = energyTotal - cappedCost;
     nextSlabThreshold = {
       limit: 250,
-      excessUnits: excess,
-      excessCost: Math.round(excess * 9.15),
+      excessUnits: units - 250,
+      excessCost: potentialSavings,
       potentialSavings,
-      tip: `Crossed the 250 unit threshold! In Kerala, exceeding 250 units strips away all lower telescopic tiers and bills every unit at ₹9.15. Saving ${excess} units saves ₹${potentialSavings}!`
+      tip: `Once monthly usage crosses 250 units, Kerala switches from telescopic slabs to a flat ₹${band.rate.toFixed(2)}/unit on your ENTIRE consumption — not just the extra units. Staying at or under 250 units would have cost ~₹${cappedCost} in energy charges instead of ₹${energyTotal}, a difference of ~₹${potentialSavings}.`
     };
   }
 
@@ -201,54 +234,77 @@ function calculateKeralaEB(units: number): EBDetails {
     meterNumber: 'KL-TVM-88192',
     consumedUnits: units,
     fixedCharges,
-    electricityDuty,
-    fuelSurcharge,
+    electricityDuty: Math.round(energyTotal * 0.10), // verified: 10% of energy charges
+    fuelSurcharge: Math.round(units * 0.19), // Fuel Adjustment Charge — revised periodically by KSERC, treat as approximate
     slabBreakdown,
     nextSlabThreshold
   };
 }
 
-function calculateTelanganaEB(units: number): EBDetails {
+// TGERC Retail Supply Tariff Order, Table 2-51 (FY 2025-26, rates retained unchanged
+// for FY 2026-27) — verified against two real TGSPDCL domestic bills (fixed charges
+// and Electricity Duty both matched exactly). LT-I Domestic is NOT one continuous
+// telescopic ladder: the category (A/B/C) is chosen by TOTAL monthly consumption, and
+// crossing into a higher category re-rates every unit at that category's own rates —
+// not just the units above the threshold.
+const TELANGANA_TIERS = [
+  { name: 'LT-I(A)', maxTotal: 100, slabs: [{ upTo: 50, rate: 1.95 }, { upTo: 100, rate: 3.10 }] },
+  { name: 'LT-I(B)', maxTotal: 200, slabs: [{ upTo: 100, rate: 3.40 }, { upTo: 200, rate: 4.80 }] },
+  { name: 'LT-I(C)', maxTotal: Infinity, slabs: [
+    { upTo: 200, rate: 5.10 }, { upTo: 300, rate: 7.70 }, { upTo: 400, rate: 9.00 },
+    { upTo: 800, rate: 9.50 }, { upTo: Infinity, rate: 10.00 }
+  ] }
+];
+const TELANGANA_COLORS = ['#2E6E4E', '#429367', '#A9812E', '#D97706', '#B33A2E', '#881337'];
+
+function calculateTelanganaEB(units: number, contractedLoadKW: number = 1): EBDetails {
+  const tierIndex = TELANGANA_TIERS.findIndex(t => units <= t.maxTotal);
+  const tier = TELANGANA_TIERS[tierIndex === -1 ? TELANGANA_TIERS.length - 1 : tierIndex];
+
   const slabBreakdown: EBSlabItem[] = [];
   let energyTotal = 0;
-  let remaining = units;
-
-  const slabs = [
-    { range: '0–50 units (Group A)', cap: 50, rate: 1.95, color: '#2E6E4E' },
-    { range: '51–100 units (Group A)', cap: 50, rate: 3.10, color: '#429367' },
-    { range: '101–200 units (Group B)', cap: 100, rate: 4.80, color: '#A9812E' },
-    { range: '201–300 units (Group C)', cap: 100, rate: 7.70, color: '#D97706' },
-    { range: '301–400 units (Group C)', cap: 100, rate: 9.00, color: '#B33A2E' },
-    { range: '401+ units (Group C)', cap: 9999, rate: 9.50, color: '#881337' }
-  ];
-
-  for (const slab of slabs) {
-    if (remaining <= 0) break;
-    const count = Math.min(remaining, slab.cap);
-    const cost = Math.round(count * slab.rate);
+  let lower = 0;
+  tier.slabs.forEach((slab, i) => {
+    if (units <= lower) return;
+    const unitsInSlab = Math.min(units, slab.upTo) - lower;
+    if (unitsInSlab <= 0) { lower = slab.upTo; return; }
+    const cost = Math.round(unitsInSlab * slab.rate);
     energyTotal += cost;
     slabBreakdown.push({
-      slabRange: slab.range,
-      unitsCharged: count,
+      slabRange: `${lower + 1}–${Math.min(units, slab.upTo)} units (${tier.name})`,
+      unitsCharged: unitsInSlab,
       ratePerUnit: slab.rate,
       totalCost: cost,
-      colorHex: slab.color
+      colorHex: TELANGANA_COLORS[i % TELANGANA_COLORS.length]
     });
-    remaining -= count;
-  }
+    lower = slab.upTo;
+  });
 
-  const electricityDuty = Math.round(energyTotal * 0.06);
-  const fixedCharges = units > 200 ? 80 : 50;
+  let nextSlabThreshold;
+  if (tierIndex > 0) {
+    const prevTier = TELANGANA_TIERS[tierIndex - 1];
+    const boundary = prevTier.maxTotal;
+    const cappedCost = telescopicCost(boundary, prevTier.slabs);
+    const potentialSavings = energyTotal - cappedCost;
+    nextSlabThreshold = {
+      limit: boundary,
+      excessUnits: units - boundary,
+      excessCost: potentialSavings,
+      potentialSavings,
+      tip: `Because usage went past ${boundary} units, your ENTIRE bill was re-rated into the ${tier.name} category — not just the extra units. Staying at or under ${boundary} units would have cost ~₹${cappedCost} in energy charges instead of ₹${energyTotal}, a difference of ~₹${potentialSavings}.`
+    };
+  }
 
   return {
     state: 'telangana',
     discomName: EB_TARIFF_DATA.telangana.discomName,
     meterNumber: 'TS-HYD-55019',
     consumedUnits: units,
-    fixedCharges,
-    electricityDuty,
-    fuelSurcharge: Math.round(units * 0.12),
-    slabBreakdown
+    fixedCharges: contractedLoadKW * (units > 800 ? 50 : 10), // ₹/kW of contracted load; ₹50/kW above 800 units
+    electricityDuty: Math.round(units * 0.06 * 100) / 100, // ₹0.06/unit flat — verified exactly against two real bills
+    fuelSurcharge: 0, // shown as a separate FSA/FCA Charges line on the bill, currently 0 on both real bills seen
+    slabBreakdown,
+    nextSlabThreshold
   };
 }
 

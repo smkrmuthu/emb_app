@@ -11,7 +11,7 @@ export const EBVisualizer: React.FC<EBVisualizerProps> = ({ initialDetails }) =>
   const [units, setUnits] = useState(initialDetails.consumedUnits);
   const [showSimulator, setShowSimulator] = useState(false);
 
-  const calculated = calculateEBTariff(initialDetails.state, units);
+  const calculated = calculateEBTariff(initialDetails.state, units, initialDetails.contractedLoadKW, initialDetails.phase);
 
   const totalSlabUnits = calculated.slabBreakdown.reduce((sum, s) => sum + s.unitsCharged, 0);
 

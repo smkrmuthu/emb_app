@@ -30,7 +30,7 @@ export const EB_TARIFF_DATA = {
   },
   telangana: {
     stateName: 'Telangana',
-    discomName: 'TSSPDCL / TSNPDCL',
+    discomName: 'TGSPDCL / TGNPDCL',
     cycleType: 'Monthly',
     telescopic: true,
     dutyRate: 0.06,

@@ -65,6 +65,8 @@ export interface EBDetails {
   fixedCharges: number;
   electricityDuty: number; // usually 5%
   fuelSurcharge: number; // FPPCA
+  contractedLoadKW?: number; // needed for Telangana's per-kW fixed charge
+  phase?: 1 | 3; // needed for Kerala's phase-dependent fixed charge
   nextSlabThreshold?: {
     limit: number;
     excessUnits: number;

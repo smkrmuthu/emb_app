@@ -66,6 +66,20 @@ const ElectricitySchema = z.object({
   govtSubsidy: z.number().nullable(),
   adjustments: z.number().nullable(),
   roundOff: z.number().nullable(),
+  // Printed category ("Domestic" / "Non-Domestic") — Telangana/Kerala bills need this
+  // to know whether the domestic slab-savings model even applies.
+  category: z.string().nullable(),
+  contractedLoadKW: z.number().nullable(),
+  phase: z.union([z.literal(1), z.literal(3)]).nullable(),
+  // Telangana-style flat charges — read as printed, never independently recomputed.
+  customerCharges: z.number().nullable(),
+  interestOnED: z.number().nullable(),
+  surcharge: z.number().nullable(),
+  acdSurcharge: z.number().nullable(),
+  fsaFcaCharges: z.number().nullable(),
+  interestOnSD: z.number().nullable(),
+  lossGain: z.number().nullable(),
+  arrears: z.number().nullable(),
   dueDate: z.string().nullable(),
   billPeriod: z.string().nullable(),
   grandTotal: z.number()
@@ -122,14 +136,19 @@ Rules:
 - grandTotal is the final amount actually payable, exactly as printed — it may be labelled "Total", "Net Amount", "PAY:", or shown as a bare "₹X.XX"/"Rs.X.XX" with no label at all.
 - If a field genuinely isn't printed on the bill or isn't legible, use null rather than guessing.`,
 
-  electricity: `Read this photo/page of an Indian electricity (EB) bill precisely and extract the fields in the given schema.
+  electricity: `Read this photo/page of an Indian electricity (EB) bill precisely and extract the fields in the given schema. Bills from Tamil Nadu (TANGEDCO), Kerala (KSEB), and Telangana (TGSPDCL/TGNPDCL) all use different layouts — read whatever this specific bill actually prints rather than assuming one fixed format.
 Rules:
 - Read every number exactly as printed — never estimate, round, or invent a value you can't actually see.
-- consumedUnits is the single most important field — read it carefully. Most Indian EB bills print a meter-reading row/table with columns "Final Reading | Initial Reading | MF | Consumption". Read the Final Reading and Initial Reading digit-by-digit, then compute Final minus Initial yourself (times MF, if MF isn't 1) — use that computed value, and cross-check it against the printed "Consumption" column if one exists; if they disagree, trust your own Final-minus-Initial calculation over a printed column that may be harder to read. This is a bi-monthly bill, so consumedUnits is usually in the range of a few hundred to low thousands — a value under 50 is almost always a misread. Do NOT confuse this field with a connection/account/meter number (those are long ID strings, not consumption).
+- consumedUnits is the single most important field — read it carefully. Some bills (TANGEDCO) print a combined meter-reading row "Final Reading | Initial Reading | MF | Consumption" — compute Final minus Initial yourself (times MF, if MF isn't 1) and cross-check against the printed Consumption column, trusting your own calculation if they disagree. Others (TGSPDCL/TGNPDCL) print separate "Present"/"Previous" reading rows plus an explicit "Units: NNN" or "Billed Units: NNN" label — when that explicit label exists, use it directly. If the bill shows BOTH a KWH units figure and a separate "Billed Units"/KVAh figure (common on non-domestic/commercial connections billed by apparent power), use the Billed Units figure — that's what's actually charged. This is usually a monthly or bi-monthly bill, so a value under 20 is almost always a misread. Do NOT confuse this field with a connection/account/meter number (those are long ID strings, not consumption).
+- category is the printed consumer category exactly as shown, e.g. "Domestic", "Non-Domestic", "Cat 1A Domestic", "2(B) Non-Domestic" — read it verbatim, don't paraphrase.
+- contractedLoadKW is the "Contracted Load" figure in kW (read just the number, e.g. 5.0 for "5.00 KW").
+- phase is 1 or 3, from a printed "Ph:1"/"Ph. 3"/"Phase: 3" field.
 - energyCharges is the base energy charge amount (often has an HSN/SAC code like "2716 0000" printed right next to it — that code is NOT the amount; read the actual rupee figure, which is usually printed with two decimals).
 - govtSubsidy is the subsidy amount subtracted (printed as a negative or under "Less:"), as a positive number.
-- adjustments is any other deduction (e.g. "Adjustments", "Advance CC Adj", "Refund of SD" totals), as a positive number.
-- grandTotal is the final "Net Payable"/"Bill Amount" actually due, exactly as printed.
+- adjustments is any deduction explicitly labelled "Adjustments" (not the same as customerCharges/surcharge/etc below), as a positive number.
+- customerCharges, interestOnED ("Interest on ED"), surcharge, acdSurcharge ("ACD Surcharge"), fsaFcaCharges ("FSA/FCA Charges"), interestOnSD ("Interest on SD"), and lossGain ("Loss/Gain", can be a tiny negative or positive number) are separate line items seen on Telangana-style bills — read each one exactly as printed if present; leave null if the bill doesn't have that line at all (don't default to 0).
+- arrears is any "Arrears as on..."/"Arrears after..."/"ACD Due" amount — sum them if there are several; leave null if all such lines read 0 or aren't printed.
+- grandTotal is the final amount actually due — prefer a "Total Due" figure over "Bill Amount"/"Net Payable" if both are printed and differ (Total Due already includes arrears).
 - serviceConnectionNumber and consumerName come from the consumer details section. consumerName is a person's name only (e.g. "DINESH.R") — never include the address, plot/door number, or street name that follows it.
 - If a field genuinely isn't printed on the bill or isn't legible, use null rather than guessing.`
 };
