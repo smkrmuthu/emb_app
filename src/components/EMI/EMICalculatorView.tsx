@@ -1,9 +1,8 @@
 import React, { useRef, useState } from 'react';
-import { calculateTrueEMI } from '../../services/emiCalculator';
+import { calculateTrueEMI, monthlyInstallmentFor } from '../../services/emiCalculator';
 import { scanEMIOfferWithLLM, scanEMIOfferTextWithLLM, EMIOfferExtraction } from '../../services/llmScanService';
 import { processPDFFile } from '../../services/pdfService';
-import { MinimumDueTrap } from './MinimumDueTrap';
-import { Link2, SlidersHorizontal, FileText, Camera, AlertTriangle } from 'lucide-react';
+import { Link2, SlidersHorizontal, FileText, Camera, AlertTriangle, Calculator } from 'lucide-react';
 import { DisputeType, BillData } from '../../types/bill';
 
 interface EMICalculatorViewProps {
@@ -38,6 +37,15 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
   // cost" column), when the scan found one — trusted directly over estimating.
   // Cleared on any manual edit so a stale scanned total can't linger.
   const [knownTotalEMIAmount, setKnownTotalEMIAmount] = useState<number | null>(null);
+
+  // Quick EMI Estimate — a separate, simpler tool: plain textbook EMI math from a
+  // total price, rate, and tenure. Deliberately independent state from the decoder
+  // above, since it answers a different question ("roughly what would this cost")
+  // rather than "what does this specific real offer actually cost after fees."
+  const [quickPrice, setQuickPrice] = useState(50000);
+  const [quickAPR, setQuickAPR] = useState(14);
+  const [quickTenure, setQuickTenure] = useState(12);
+  const quickMonthly = monthlyInstallmentFor(quickPrice, quickTenure, quickAPR);
 
   const result = calculateTrueEMI({
     productName,
@@ -392,8 +400,61 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
         </div>
       </div>
 
-      {/* Minimum Due Compounding Trap */}
-      <MinimumDueTrap />
+      {/* Quick EMI Estimate — plain textbook math, separate from the true-cost
+          decoder above (no fee/discount adjustments). For shopping/planning
+          before you've found (or scanned) a specific real offer. */}
+      <div style={{ background: 'var(--paper-2)', padding: '12px', borderRadius: '10px', marginTop: '16px', border: '1px solid var(--line)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, color: 'var(--ink)', marginBottom: '8px' }}>
+          <Calculator size={13} />
+          <span>Quick EMI Estimate</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '10.5px' }}>
+          <div>
+            <label style={{ color: 'var(--muted)', display: 'block' }}>Total Price (₹)</label>
+            <input
+              type="number"
+              value={quickPrice}
+              onChange={(e) => setQuickPrice(Number(e.target.value))}
+              style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid var(--line)', fontFamily: 'var(--font-mono)' }}
+            />
+          </div>
+          <div>
+            <label style={{ color: 'var(--muted)', display: 'block' }}>APR (% p.a.)</label>
+            <input
+              type="number"
+              value={quickAPR}
+              onChange={(e) => setQuickAPR(Number(e.target.value))}
+              style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid var(--line)', fontFamily: 'var(--font-mono)' }}
+            />
+          </div>
+          <div style={{ gridColumn: 'span 2' }}>
+            <label style={{ color: 'var(--muted)', display: 'block' }}>Tenure (Months)</label>
+            <select
+              value={quickTenure}
+              onChange={(e) => setQuickTenure(Number(e.target.value))}
+              style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid var(--line)' }}
+            >
+              <option value={3}>3 Months</option>
+              <option value={6}>6 Months</option>
+              <option value={9}>9 Months</option>
+              <option value={12}>12 Months</option>
+              <option value={18}>18 Months</option>
+              <option value={24}>24 Months</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ marginTop: '10px', padding: '8px', background: 'var(--paper)', borderRadius: '6px', border: '1px solid var(--line)', textAlign: 'center' }}>
+          <div style={{ fontSize: '9.5px', color: 'var(--muted)' }}>Estimated Monthly Installment</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '20px', fontWeight: 700, color: 'var(--ink)' }}>
+            ₹{quickMonthly.toLocaleString('en-IN')}/mo
+          </div>
+        </div>
+
+        <div style={{ fontSize: '9px', color: 'var(--muted)', marginTop: '8px', lineHeight: 1.4 }}>
+          Plain EMI math only — doesn't account for processing fee, cashback, or how a "No Cost EMI" discount changes the real number. For that, use "Auto-Fill From an Offer" above.
+        </div>
+      </div>
 
       {/* Dispute Mis-selling CTA */}
       <div style={{ marginTop: 'auto', paddingTop: '16px' }}>

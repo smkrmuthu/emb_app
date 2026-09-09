@@ -29,7 +29,11 @@ export interface EMICalcResult {
   summaryExplanation: string;
 }
 
-function monthlyInstallmentFor(cashPrice: number, tenureMonths: number, annualRatePercent: number): number {
+/** Plain textbook reducing-balance EMI formula — exported for the standalone
+ *  "Quick EMI Estimate" tool, which deliberately doesn't factor in processing
+ *  fee, cashback, or how a "No Cost EMI" discount changes the real number
+ *  (that's what the full calculateTrueEMI decoder above it is for). */
+export function monthlyInstallmentFor(cashPrice: number, tenureMonths: number, annualRatePercent: number): number {
   if (annualRatePercent <= 0) return Math.round(cashPrice / tenureMonths);
   const r = annualRatePercent / 100 / 12;
   const factor = Math.pow(1 + r, tenureMonths);
