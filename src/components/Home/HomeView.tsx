@@ -7,9 +7,12 @@ import { Zap, CreditCard, Utensils, ShoppingCart, Hotel, Flame, AlertCircle, Che
 interface HomeViewProps {
   onSelectBill: (bill: BillData) => void;
   onUploadBill: (fileName: string, fileUrl?: string, pdfText?: string, sampleId?: string) => void;
+  /** Bills actually scanned this session (newest first) — empty until the first
+   *  successful scan, at which point it replaces the sample-bill placeholder below. */
+  recentScans: BillData[];
 }
 
-export const HomeView: React.FC<HomeViewProps> = ({ onSelectBill, onUploadBill }) => {
+export const HomeView: React.FC<HomeViewProps> = ({ onSelectBill, onUploadBill, recentScans }) => {
   const [selectedState, setSelectedState] = useState<IndianState | 'all'>('all');
 
   const getCategoryIcon = (type: BillData['type']) => {
@@ -33,6 +36,11 @@ export const HomeView: React.FC<HomeViewProps> = ({ onSelectBill, onUploadBill }
     if (selectedState === 'all') return true;
     return b.state === selectedState || b.state === 'national';
   });
+
+  // "Recent Scanned Bills" shows what was actually scanned this session; only falls
+  // back to the sample bills (clearly labelled as such) before the first real scan.
+  const hasRealScans = recentScans.length > 0;
+  const recentList = hasRealScans ? recentScans : filteredBills;
 
   return (
     <div className="phone-screen animate-fade-in">
@@ -106,12 +114,12 @@ export const HomeView: React.FC<HomeViewProps> = ({ onSelectBill, onUploadBill }
       {/* Recent Bills List */}
       <div style={{ marginTop: '16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
         <div className="section-label">
-          <span>RECENT SCANNED BILLS</span>
-          <span>{filteredBills.slice(0, 3).length} BILLS</span>
+          <span>RECENT SCANNED BILLS{!hasRealScans ? ' (DEMO)' : ''}</span>
+          <span>{recentList.slice(0, 3).length} BILLS</span>
         </div>
 
         <div className="recent-list">
-          {filteredBills.slice(0, 3).map((bill) => {
+          {recentList.slice(0, 3).map((bill) => {
             const hasOverchargeFlag = bill.flags.some((f) => f.severity === 'danger');
             return (
               <div

@@ -41,6 +41,11 @@ export const App: React.FC = () => {
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string | undefined>();
   const [uploadedFileName, setUploadedFileName] = useState<string | undefined>();
 
+  // Session-only scan history (resets on reload — no backend yet, that's Phase 2's
+  // persistent storage). Lets "Recent Scanned Bills" reflect what was actually
+  // scanned this session instead of always showing the same static demo bills.
+  const [recentScans, setRecentScans] = useState<BillData[]>([]);
+
   // Bill type picker — shown when user selects or when auto-detection is doubtful
   const [pendingUpload, setPendingUpload] = useState<{
     fileName: string;
@@ -79,6 +84,11 @@ export const App: React.FC = () => {
     }
 
     setActiveBill(result.bill);
+    // Only successfully-read bills join "Recent Scanned Bills" — an unreadable-bill
+    // placeholder isn't something worth remembering as a real scan.
+    if (result.bill.totalAmount > 0) {
+      setRecentScans(prev => [result.bill, ...prev].slice(0, 10));
+    }
     setIsScanning(false);
   }, []);
 
@@ -266,6 +276,7 @@ export const App: React.FC = () => {
                   <HomeView
                     onSelectBill={handleSelectBill}
                     onUploadBill={handleUploadBill}
+                    recentScans={recentScans}
                   />
                 )}
                 {currentTab === 'breakdown' && (
