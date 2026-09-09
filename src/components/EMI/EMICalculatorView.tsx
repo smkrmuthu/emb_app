@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { calculateTrueEMI, monthlyInstallmentFor } from '../../services/emiCalculator';
 import { scanEMIOfferWithLLM, scanEMIOfferTextWithLLM, EMIOfferExtraction } from '../../services/llmScanService';
 import { processPDFFile } from '../../services/pdfService';
-import { SlidersHorizontal, Camera, AlertTriangle, Calculator } from 'lucide-react';
+import { SlidersHorizontal, Camera, FileUp, AlertTriangle, Calculator } from 'lucide-react';
 
 export const EMICalculatorView: React.FC = () => {
   const [productName, setProductName] = useState('iPhone 15 (128 GB)');
@@ -21,6 +21,7 @@ export const EMICalculatorView: React.FC = () => {
   // (many are JS-rendered SPAs) — so there's no non-functional toggle for it here;
   // it can come back cleanly once actually built.
   const offerFileInputRef = useRef<HTMLInputElement>(null);
+  const offerCameraInputRef = useRef<HTMLInputElement>(null);
   const [isScanningOffer, setIsScanningOffer] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [scannedOffer, setScannedOffer] = useState<EMIOfferExtraction | null>(null);
@@ -145,23 +146,43 @@ export const EMICalculatorView: React.FC = () => {
 
         <input
           type="file"
+          ref={offerCameraInputRef}
+          onChange={handleOfferFileChange}
+          onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+          accept="image/*"
+          capture="environment"
+          style={{ display: 'none' }}
+        />
+        <input
+          type="file"
           ref={offerFileInputRef}
           onChange={handleOfferFileChange}
           onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
           accept="image/*,application/pdf"
           style={{ display: 'none' }}
         />
-        <button
-          className="btn-outline"
-          style={{ width: '100%', justifyContent: 'center', padding: '8px' }}
-          onClick={() => offerFileInputRef.current?.click()}
-          disabled={isScanningOffer}
-        >
-          <Camera size={13} />
-          <span>{isScanningOffer ? 'Reading EMI options…' : 'Upload a Screenshot or PDF'}</span>
-        </button>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button
+            className="btn-outline"
+            style={{ flex: 1, justifyContent: 'center', padding: '8px' }}
+            onClick={() => offerCameraInputRef.current?.click()}
+            disabled={isScanningOffer}
+          >
+            <Camera size={13} />
+            <span>Take Photo</span>
+          </button>
+          <button
+            className="btn-outline"
+            style={{ flex: 1, justifyContent: 'center', padding: '8px' }}
+            onClick={() => offerFileInputRef.current?.click()}
+            disabled={isScanningOffer}
+          >
+            <FileUp size={13} />
+            <span>Upload File</span>
+          </button>
+        </div>
         <div style={{ fontSize: '9.5px', color: 'var(--muted)', marginTop: '4px', textAlign: 'center' }}>
-          Apple, Amazon, Flipkart, or your bank's EMI popup/PDF — we'll fill in the numbers below
+          {isScanningOffer ? 'Reading EMI options…' : "Apple, Amazon, Flipkart, or your bank's EMI popup/PDF — we'll fill in the numbers below"}
         </div>
 
         {scanError && (
