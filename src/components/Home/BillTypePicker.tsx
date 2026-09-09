@@ -1,6 +1,6 @@
 import React from 'react';
 import { BillType } from '../../types/bill';
-import { Zap, CreditCard, Utensils, ShoppingCart, Hotel, Flame, X, HelpCircle } from 'lucide-react';
+import { Zap, CreditCard, Utensils, ShoppingCart, X, HelpCircle } from 'lucide-react';
 
 interface BillTypePickerProps {
   fileName: string;
@@ -36,22 +36,6 @@ const BILL_TYPES: { type: BillType; label: string; icon: React.ReactNode; desc: 
     icon: <ShoppingCart size={20} />,
     desc: 'DMart, BigBasket, Reliance Fresh, kirana stores',
     color: '#2563EB'
-  },
-  {
-    type: 'hotel',
-    label: 'Hotel Stay Folio',
-    icon: <Hotel size={20} />,
-    desc: 'Room charges, resort fees, minibar, in-room dining',
-    color: '#7C3AED',
-    disabled: true
-  },
-  {
-    type: 'gas',
-    label: 'Gas Bill (LPG / PNG)',
-    icon: <Flame size={20} />,
-    desc: 'Indane, HPCL, Bharat Gas, IGL, MGL piped gas',
-    color: '#DC2626',
-    disabled: true
   }
 ];
 

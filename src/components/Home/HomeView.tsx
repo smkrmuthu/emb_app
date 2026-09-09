@@ -23,10 +23,10 @@ export const HomeView: React.FC<HomeViewProps> = ({ onSelectBill, onUploadBill }
     }
   };
 
-  // Credit Card/EMI, Hotel, and Gas are temporarily disabled app-wide (see
-  // BillTypePicker.tsx) — hide their sample chips too so there's nowhere left
-  // to "discover" a category you can no longer actually scan a bill into.
-  const DISABLED_TYPES: BillData['type'][] = ['credit_card', 'hotel', 'gas'];
+  // Hotel and Gas are not part of Phase 1 (see BillTypePicker.tsx) — hide their
+  // sample chips too so there's nowhere left to "discover" a category you can no
+  // longer actually scan a bill into. Credit Card is fully active, not disabled.
+  const DISABLED_TYPES: BillData['type'][] = ['hotel', 'gas'];
 
   const filteredBills = SAMPLE_BILLS.filter((b) => {
     if (DISABLED_TYPES.includes(b.type)) return false;
