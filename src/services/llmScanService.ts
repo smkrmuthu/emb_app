@@ -42,6 +42,16 @@ function dataUrlToBase64(dataUrl: string): { base64: string; mediaType: string }
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
+/** Thrown when the model itself flags that the scanned content doesn't match the
+ *  category the user picked (matchesCategory: false) — retrying with the same
+ *  wrong category would just waste attempts, so this skips the retry loop. */
+export class CategoryMismatchError extends Error {
+  constructor(public billType: BillType) {
+    super(`Scanned content doesn't match the selected "${billType}" category`);
+    this.name = 'CategoryMismatchError';
+  }
+}
+
 async function callScanEndpoint<T = LLMBillExtraction>(body: Record<string, unknown>): Promise<T> {
   const resp = await fetch(LLM_SCAN_ENDPOINT, {
     method: 'POST',
@@ -68,8 +78,12 @@ async function withRetries(body: Record<string, unknown>, billType: BillType): P
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const data = await callScanEndpoint(body);
+      if (data.matchesCategory === false) {
+        throw new CategoryMismatchError(billType);
+      }
       return buildBillFromLLMExtraction(data, billType);
     } catch (err) {
+      if (err instanceof CategoryMismatchError) throw err;
       lastError = err;
       if (attempt < MAX_ATTEMPTS) await delay(600 * attempt);
     }

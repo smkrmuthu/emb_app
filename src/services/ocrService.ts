@@ -11,7 +11,7 @@ import { BillData, BillType } from '../types/bill';
 import { SAMPLE_BILLS } from '../data/sampleBills';
 import { extractTextFromImage } from './realOCR';
 import { parseBillFromOCR } from './billParser';
-import { isLLMScanSupported, requiresPdfText, scanBillTextWithLLM, scanBillWithLLM } from './llmScanService';
+import { CategoryMismatchError, isLLMScanSupported, requiresPdfText, scanBillTextWithLLM, scanBillWithLLM } from './llmScanService';
 
 export interface ScanProgressCallback {
   stepIndex: number;
@@ -110,6 +110,34 @@ function buildPdfRequiredPlaceholder(type: BillType): BillData {
   };
 }
 
+/** The model itself determined the scanned content doesn't match the category the
+ *  user picked (e.g. an electricity bill scanned as "grocery") — a dedicated result
+ *  distinct from "unreadable", since the photo is likely fine and the fix is to
+ *  re-pick the category, not retake the photo. */
+function buildCategoryMismatchPlaceholder(type: BillType): BillData {
+  return {
+    id: `scanned-${Date.now()}`,
+    type,
+    state: 'national',
+    billerName: 'Wrong Category Selected?',
+    categoryLabel: getBestMatchingSample(type).categoryLabel,
+    billNumber: '-',
+    billingCycle: '-',
+    billDate: '-',
+    dueDate: '-',
+    totalAmount: 0,
+    summaryPlain: `This doesn't look like a "${getBestMatchingSample(type).categoryLabel}" bill. Please double-check the category and try again.`,
+    lineItems: [],
+    flags: [{
+      id: 'category-mismatch',
+      severity: 'warning',
+      title: "⚠ This Doesn't Look Like the Selected Category",
+      description: `We read the photo/file, but its contents don't match "${getBestMatchingSample(type).categoryLabel}". Tap "Category" below to pick the correct bill type — no need to retake the photo.`,
+      lawCitation: ''
+    }]
+  };
+}
+
 // ─── Main Scan Pipeline ──────────────────────────────────────────────────────
 
 export interface ScanResult {
@@ -155,6 +183,11 @@ export async function scanRealBill(
         await delay(200);
         return { bill: llmBill };
       } catch (err) {
+        if (err instanceof CategoryMismatchError) {
+          // Retrying the same wrong category via regex would be equally pointless —
+          // surface the mismatch immediately instead of falling through to OCR.
+          return { bill: buildCategoryMismatchPlaceholder(hintedType) };
+        }
         console.warn('LLM text scan failed, falling back to regex parsing of the same PDF text:', err);
         // ocrText below is seeded from this same pdfText, so the regex-based
         // buildCreditCard() fallback still has real extracted text to work with.
@@ -171,6 +204,11 @@ export async function scanRealBill(
         await delay(200);
         return { bill: llmBill };
       } catch (err) {
+        if (err instanceof CategoryMismatchError) {
+          // Retrying the same wrong category via OCR/regex would be equally
+          // pointless — surface the mismatch immediately instead.
+          return { bill: buildCategoryMismatchPlaceholder(hintedType) };
+        }
         console.warn('LLM scan failed, falling back to OCR pipeline:', err);
       }
     }

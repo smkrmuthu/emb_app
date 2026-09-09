@@ -1098,6 +1098,9 @@ export function parseBillFromOCR(rawText: string, billType: BillType): BillData 
 // buildElectricityFromParsed), so GST checks, slab math, and legal citations are
 // identical between the OCR path and the LLM path.
 export interface LLMBillExtraction {
+  /** False when the model determines the scanned content doesn't match the category
+   *  the user picked (e.g. an electricity bill scanned as "grocery"). */
+  matchesCategory?: boolean;
   billerName: string;
   billNumber?: string;
   billDate?: string;

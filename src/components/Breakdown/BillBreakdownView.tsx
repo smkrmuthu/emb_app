@@ -33,7 +33,8 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
     setTimeout(() => setIsCopied(false), 2500);
   };
 
-  const isLowQuality = bill.flags.some(f => f.id === 'ocr-low-quality') || (bill.totalAmount === 0 && bill.lineItems.length <= 1);
+  const isCategoryMismatch = bill.flags.some(f => f.id === 'category-mismatch');
+  const isLowQuality = !isCategoryMismatch && (bill.flags.some(f => f.id === 'ocr-low-quality') || (bill.totalAmount === 0 && bill.lineItems.length <= 1));
 
   const handleSpeak = () => {
     if (!('speechSynthesis' in window)) {
@@ -116,6 +117,31 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
           <span>Edit Amounts</span>
         </button>
       </div>
+
+      {/* Category Mismatch Alert — the model itself flagged the content doesn't match
+          the picked category. Points at "Category", not "Re-take" — the photo is
+          likely fine, just the wrong type was selected. */}
+      {isCategoryMismatch && (
+        <div className="callout-box warning" style={{ marginBottom: '12px', borderLeftWidth: '4px' }}>
+          <div className="callout-head">
+            <Tag size={15} style={{ color: 'var(--warning)' }} />
+            <span style={{ fontWeight: 700 }}>Wrong Category Selected?</span>
+          </div>
+          <div className="callout-body" style={{ marginTop: '4px', lineHeight: 1.45 }}>
+            {`This doesn't look like a "${bill.categoryLabel}" bill. The photo/file itself looks readable — it's likely just the wrong category was picked. Tap "Category" to re-pick the correct type.`}
+          </div>
+          <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+            <button
+              className="btn-gold"
+              style={{ padding: '6px 10px', fontSize: '10px' }}
+              onClick={onChangeBillType}
+            >
+              <Tag size={11} />
+              <span>Pick the Correct Category</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Unreadable / Low Quality Alert Callout — All Categories */}
       {isLowQuality && (

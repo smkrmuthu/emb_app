@@ -27,6 +27,10 @@ const ItemSchema = z.object({
 });
 
 const RestaurantSchema = z.object({
+  // True only if this image genuinely looks like a restaurant/dining bill — not an
+  // electricity bill, grocery receipt, credit card statement, or anything else the
+  // user may have mistakenly picked "Restaurant" for. See matchesCategory rule below.
+  matchesCategory: z.boolean(),
   billerName: z.string(),
   billNumber: z.string().nullable(),
   billDate: z.string().nullable(),
@@ -43,6 +47,7 @@ const RestaurantSchema = z.object({
 });
 
 const GrocerySchema = z.object({
+  matchesCategory: z.boolean(),
   billerName: z.string(),
   billNumber: z.string().nullable(),
   billDate: z.string().nullable(),
@@ -56,6 +61,7 @@ const GrocerySchema = z.object({
 });
 
 const ElectricitySchema = z.object({
+  matchesCategory: z.boolean(),
   billerName: z.string(),
   discomName: z.string().nullable(),
   serviceConnectionNumber: z.string().nullable(),
@@ -87,6 +93,7 @@ const ElectricitySchema = z.object({
 });
 
 const CreditCardSchema = z.object({
+  matchesCategory: z.boolean(),
   bankName: z.string(),
   cardNumbers: z.array(z.string()).nullable(),
   statementPeriod: z.string().nullable(),
@@ -148,6 +155,7 @@ type SupportedBillType = keyof typeof SCHEMAS;
 const IMAGE_PROMPTS: Record<ImageBillType, string> = {
   restaurant: `Read this photo of an Indian restaurant bill/receipt precisely and extract the fields in the given schema.
 Rules:
+- matchesCategory: set this to true only if the photo genuinely shows a restaurant/dining bill (food items, CGST/SGST on food). Set it to false if the photo is clearly something else — an electricity bill, a grocery receipt, a credit card statement, a screenshot, or anything unrelated — and in that case still fill the other fields with your best-effort reading (or nulls) rather than leaving them blank.
 - Read every number exactly as printed — never estimate, round, or invent a value you can't actually see.
 - "items" is every food/drink line item with its printed quantity, rate, and amount (use null for qty/rate if only one number is printed for that line — put it in "amount").
 - Do NOT include GST/tax rows, "Sub Total", "Round off", or "Total" rows as items.
@@ -159,6 +167,7 @@ Rules:
 
   grocery: `Read this photo of an Indian grocery/supermarket bill/receipt precisely and extract the fields in the given schema.
 Rules:
+- matchesCategory: set this to true only if the photo genuinely shows a grocery/supermarket receipt. Set it to false if the photo is clearly something else — an electricity bill, a restaurant bill, a credit card statement, a screenshot, or anything unrelated — and in that case still fill the other fields with your best-effort reading (or nulls) rather than leaving them blank.
 - Read every number exactly as printed — never estimate, round, or invent a value you can't actually see.
 - "items" is every purchased product line with its amount. Do NOT include tax, discount, round-off, weight, or item-count rows as items.
 - discount and roundOff are 0/null if not printed.
@@ -168,6 +177,7 @@ Rules:
 
   electricity: `Read this photo/page of an Indian electricity (EB) bill precisely and extract the fields in the given schema. Bills from Tamil Nadu (TANGEDCO), Kerala (KSEB), and Telangana (TGSPDCL/TGNPDCL) all use different layouts — read whatever this specific bill actually prints rather than assuming one fixed format.
 Rules:
+- matchesCategory: set this to true only if the photo genuinely shows an electricity/EB bill. Set it to false if the photo is clearly something else — a restaurant bill, a grocery receipt, a credit card statement, a screenshot, or anything unrelated — and in that case still fill the other fields with your best-effort reading (or nulls) rather than leaving them blank.
 - Read every number exactly as printed — never estimate, round, or invent a value you can't actually see.
 - consumedUnits is the single most important field — read it carefully. Some bills (TANGEDCO) print a combined meter-reading row "Final Reading | Initial Reading | MF | Consumption" — compute Final minus Initial yourself (times MF, if MF isn't 1) and cross-check against the printed Consumption column, trusting your own calculation if they disagree. Others (TGSPDCL/TGNPDCL) print separate "Present"/"Previous" reading rows plus an explicit "Units: NNN" or "Billed Units: NNN" label — when that explicit label exists, use it directly. If the bill shows BOTH a KWH units figure and a separate "Billed Units"/KVAh figure (common on non-domestic/commercial connections billed by apparent power), use the Billed Units figure — that's what's actually charged. This is usually a monthly or bi-monthly bill, so a value under 20 is almost always a misread. Do NOT confuse this field with a connection/account/meter number (those are long ID strings, not consumption).
 - category is the printed consumer category exactly as shown, e.g. "Domestic", "Non-Domestic", "Cat 1A Domestic", "2(B) Non-Domestic" — read it verbatim, don't paraphrase.
@@ -201,6 +211,7 @@ Rules:
 const TEXT_PROMPTS: Record<TextBillType, string> = {
   credit_card: `Below is the full extracted text of an Indian credit card statement PDF (every page included, in order). Extract the fields in the given schema.
 Rules:
+- matchesCategory: set this to true only if this text genuinely is a credit card statement (Total Amount Due, Minimum Amount Due, card numbers, etc). Set it to false if the text is clearly something else — an electricity bill, a restaurant bill, an EMI offer document, or anything unrelated — and in that case still fill the other fields with your best-effort reading (or nulls) rather than leaving them blank.
 - Read every number exactly as it appears in the text — never estimate or invent a value that isn't there.
 - bankName is the issuing bank (e.g. "IDFC FIRST Bank", "HDFC Bank"), not the cardholder's name.
 - cardNumbers is every masked card number mentioned (e.g. "XXXX 5323") — a consolidated statement can cover more than one card; list them all. Null if none is legible.
