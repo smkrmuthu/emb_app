@@ -119,6 +119,10 @@ export interface EMIOfferOption {
   interestRatePercent: number | null;
   processingFee: number | null;
   isNoCost: boolean;
+  /** The plan's own final total, when the screen already states it directly
+   *  (e.g. an Amazon/Flipkart-style "Total cost" column) — more reliable than
+   *  anything estimated from rate/tenure, so prefer this when present. */
+  totalCost: number | null;
 }
 
 export interface EMIOfferExtraction {

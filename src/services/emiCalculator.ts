@@ -3,6 +3,11 @@ export interface EMICalcInput {
   tenureMonths: number;
   processingFee: number;
   advertisedRate?: number; // 0 for "No Cost EMI"; the bank's own disclosed rate otherwise
+  // Some scanned offers already print the plan's own final total (e.g. an
+  // Amazon/Flipkart-style "Total cost" column) — pass it here to use that directly
+  // instead of estimating installments from advertisedRate. Doesn't include the
+  // separate processing fee, which is still added on top either way.
+  knownTotalEMIAmount?: number | null;
   productName?: string;
   retailer?: string;
   bankName?: string;
@@ -66,10 +71,12 @@ function solveMonthlyIRR(netPrincipal: number, monthlyInstallment: number, tenur
  * cash-flow-based APR methodology regardless of which kind of offer it is.
  */
 export function calculateTrueEMI(input: EMICalcInput): EMICalcResult {
-  const { cashPrice, tenureMonths, processingFee, advertisedRate = 0 } = input;
+  const { cashPrice, tenureMonths, processingFee, advertisedRate = 0, knownTotalEMIAmount } = input;
 
-  const monthlyInstallment = monthlyInstallmentFor(cashPrice, tenureMonths, advertisedRate);
-  const totalEMIAmount = monthlyInstallment * tenureMonths;
+  const totalEMIAmount = knownTotalEMIAmount != null && knownTotalEMIAmount > 0
+    ? knownTotalEMIAmount
+    : monthlyInstallmentFor(cashPrice, tenureMonths, advertisedRate) * tenureMonths;
+  const monthlyInstallment = Math.round(totalEMIAmount / tenureMonths);
 
   const processingFeeGST = Math.round(processingFee * 0.18);
   const netPrincipal = cashPrice - processingFee - processingFeeGST;

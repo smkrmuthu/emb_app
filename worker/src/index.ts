@@ -110,7 +110,10 @@ const EMIOfferOptionSchema = z.object({
   monthlyEMI: z.number().nullable(),
   interestRatePercent: z.number().nullable(),
   processingFee: z.number().nullable(),
-  isNoCost: z.boolean()
+  isNoCost: z.boolean(),
+  // Some screens (Amazon/Flipkart-style tables) already print the bank's own
+  // final total for this exact plan — trust that directly over any estimate.
+  totalCost: z.number().nullable()
 });
 const EMIOfferSchema = z.object({
   productName: z.string().nullable(),
@@ -184,12 +187,13 @@ Rules:
 - productName is the item being financed, if shown (e.g. "iPhone 15 128GB"). retailer is the site/brand this screen belongs to (e.g. "Apple India", "Amazon", "Flipkart", "HDFC Bank"), if identifiable from logos/branding/URL visible in the screenshot.
 - cashPrice is the product's full one-time price, if shown ANYWHERE on the screen (often near the top, separate from the EMI table) — this is frequently absent from EMI-only popups, so leave it null rather than guessing; do not compute it from the EMI amounts yourself.
 - options is one entry per distinct bank+tenure row/card actually shown:
-  - bankName exactly as printed (e.g. "HDFC Bank", "ICICI Bank", "Bajaj Finserv").
+  - bankName exactly as printed (e.g. "HDFC Bank", "ICICI Bank", "Amazon Pay ICICI Credit Card").
   - tenureMonths is the number of months for that specific row (e.g. 6, 9, 12, 24).
   - monthlyEMI is the per-month amount shown for that row, if printed.
-  - interestRatePercent is the stated annual rate for that row if shown (e.g. 13 for "13% p.a."); use 0 only if the row is explicitly labelled "No Cost"/"Zero Interest"/"0%" — otherwise null if no rate is printed at all.
-  - processingFee is that row's processing fee if shown; null if not printed (fees are often only shown in fine print elsewhere, not per-row).
-  - isNoCost is true only if that specific row is explicitly labelled "No Cost EMI"/"Zero Interest"/"0% EMI" — never infer this from the numbers yourself.
+  - interestRatePercent is the stated annual rate for that row if shown (e.g. 13 for "13% p.a.", or the "Interest(pa)" percentage in an Amazon/Flipkart-style table); use 0 only if the row is No Cost — otherwise null if no rate is printed at all.
+  - totalCost is that row's own final total cost, if the screen already states it directly (e.g. a "Total cost"/"Total Payable" column) — trust this printed figure over anything you'd otherwise estimate; null if not shown.
+  - isNoCost is true if that row sits under a "No Cost EMI"/"Zero Interest"/"0% EMI" heading or section, OR is itself so labelled — e.g. in an Amazon/Flipkart-style table split into a "No Cost EMI Plans" section and a "Standard Plans" section, every row under "No Cost EMI Plans" is isNoCost:true even though its own "Interest(pa)" column still shows a nonzero rate offset by an equal "Discount" column (that rate is the bank's underlying nominal rate before the discount, not what the customer actually pays) — never infer isNoCost from the numbers alone, only from its labelled section/row.
+  - processingFee is that row's own fee if individually shown; if instead ONE processing fee is stated once for the whole screen/card (e.g. "Processing Fee of ₹299 by Bank" printed above the table, applying to every plan), populate that same fee for every option rather than leaving it null.
 - If the screen shows only one plan (not a table), return a single-item options array.
 - If a field genuinely isn't shown or isn't legible, use null rather than guessing.`
 };
@@ -210,7 +214,7 @@ Rules:
   emi_offer: `Below is text extracted from a PDF describing EMI/installment options for a product — e.g. a bank's Key Fact Statement, or a retailer's EMI terms document. Extract the fields in the given schema, same meaning as reading this content off a screen:
 - productName is the item being financed, if stated. retailer is the site/brand/bank this document is from, if identifiable.
 - cashPrice is the product's full one-time price if explicitly stated somewhere in the text — leave null rather than computing it from EMI amounts yourself.
-- options is one entry per distinct bank+tenure combination mentioned: bankName, tenureMonths, monthlyEMI (per-month amount if stated), interestRatePercent (the stated annual rate, or 0 only if explicitly "No Cost"/"Zero Interest"/"0%" — otherwise null), processingFee (if stated for that plan), and isNoCost (true only if that specific plan is explicitly labelled "No Cost EMI"/"Zero Interest"/"0% EMI" — never inferred from the numbers).
+- options is one entry per distinct bank+tenure combination mentioned: bankName, tenureMonths, monthlyEMI (per-month amount if stated), interestRatePercent (the stated annual rate, or 0 only for a No Cost plan — otherwise null), totalCost (that plan's own final total if directly stated — trust it over estimating), and isNoCost (true if that plan is under a "No Cost EMI" heading/section or itself so labelled — never inferred from the numbers). If one processing fee is stated once for the whole document rather than per plan, apply that same fee to every option instead of leaving it null.
 - Read every number exactly as it appears in the text — never estimate or invent a value that isn't there. If a field genuinely isn't present, use null rather than guessing.`
 };
 

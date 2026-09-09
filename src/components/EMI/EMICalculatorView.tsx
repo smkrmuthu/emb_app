@@ -34,6 +34,10 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
   const [scannedOffer, setScannedOffer] = useState<EMIOfferExtraction | null>(null);
   const [selectedOptionIdx, setSelectedOptionIdx] = useState(0);
   const [cashPriceIsEstimated, setCashPriceIsEstimated] = useState(false);
+  // The selected plan's own stated final total (e.g. an Amazon/Flipkart "Total
+  // cost" column), when the scan found one — trusted directly over estimating.
+  // Cleared on any manual edit so a stale scanned total can't linger.
+  const [knownTotalEMIAmount, setKnownTotalEMIAmount] = useState<number | null>(null);
 
   const result = calculateTrueEMI({
     productName,
@@ -41,7 +45,8 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
     cashPrice,
     tenureMonths,
     processingFee,
-    advertisedRate: advertisedRatePercent
+    advertisedRate: advertisedRatePercent,
+    knownTotalEMIAmount
   });
 
   const applyOffer = (offer: EMIOfferExtraction, idx: number) => {
@@ -54,9 +59,16 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
     // interestRatePercent shouldn't override it either way.
     setAdvertisedRatePercent(option.isNoCost ? 0 : (option.interestRatePercent ?? 0));
     if (option.processingFee != null) setProcessingFee(option.processingFee);
+    setKnownTotalEMIAmount(option.totalCost);
     if (offer.cashPrice != null) {
       setCashPrice(offer.cashPrice);
       setCashPriceIsEstimated(false);
+    } else if (option.isNoCost && option.totalCost != null) {
+      // For a No-Cost plan, the bank's own total already ≈ the real cash price
+      // (the discount fully offsets their interest) — a better estimate than
+      // reconstructing it from monthly × tenure.
+      setCashPrice(option.totalCost);
+      setCashPriceIsEstimated(true);
     } else if (option.monthlyEMI != null) {
       // Cash price is often just not shown on these screens — under the standard
       // "No-Cost EMI" assumption (installments sum to the cash price with the
@@ -233,7 +245,8 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
                 cashPrice,
                 tenureMonths: opt.tenureMonths,
                 processingFee: opt.processingFee ?? processingFee,
-                advertisedRate: opt.isNoCost ? 0 : (opt.interestRatePercent ?? 0)
+                advertisedRate: opt.isNoCost ? 0 : (opt.interestRatePercent ?? 0),
+                knownTotalEMIAmount: opt.totalCost
               });
               const isSelected = idx === selectedOptionIdx;
               return (
@@ -289,7 +302,7 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
               <input
                 type="number"
                 value={cashPrice}
-                onChange={(e) => { setCashPrice(Number(e.target.value)); setCashPriceIsEstimated(false); }}
+                onChange={(e) => { setCashPrice(Number(e.target.value)); setCashPriceIsEstimated(false); setKnownTotalEMIAmount(null); }}
                 style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid var(--line)', fontFamily: 'var(--font-mono)' }}
               />
               {cashPriceIsEstimated && (
@@ -302,7 +315,7 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
               <label style={{ color: 'var(--muted)', display: 'block' }}>Tenure (Months)</label>
               <select
                 value={tenureMonths}
-                onChange={(e) => setTenureMonths(Number(e.target.value))}
+                onChange={(e) => { setTenureMonths(Number(e.target.value)); setKnownTotalEMIAmount(null); }}
                 style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid var(--line)' }}
               >
                 <option value={3}>3 Months</option>
@@ -326,7 +339,7 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
               <input
                 type="number"
                 value={advertisedRatePercent}
-                onChange={(e) => setAdvertisedRatePercent(Number(e.target.value))}
+                onChange={(e) => { setAdvertisedRatePercent(Number(e.target.value)); setKnownTotalEMIAmount(null); }}
                 placeholder="0 = No Cost EMI"
                 style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid var(--line)', fontFamily: 'var(--font-mono)' }}
               />
