@@ -51,6 +51,29 @@ export const EMICalculatorView: React.FC = () => {
     knownTotalEMIAmount
   });
 
+  // Cash price is a fact about the PRODUCT being financed, not about any one
+  // bank/tenure option — every row in the comparison table must share the same
+  // cash price for the comparison to mean anything. Resolve it once when the
+  // offer is scanned (see handleOfferFile) rather than re-deriving it from
+  // whichever row was last clicked: different options embed different amounts
+  // of hidden interest, so a per-option monthly×tenure estimate differs row to
+  // row, and re-setting the shared cashPrice on every click made every row's
+  // True APR shift as you browsed the list.
+  const resolveCashPrice = (offer: EMIOfferExtraction): { value: number; isEstimated: boolean } | null => {
+    if (offer.cashPrice != null) return { value: offer.cashPrice, isEstimated: false };
+    const noCost = offer.options.find((o) => o.isNoCost);
+    // For a No-Cost plan, the bank's own total already ≈ the real cash price
+    // (the discount fully offsets their interest) — a better estimate than
+    // reconstructing it from monthly × tenure.
+    if (noCost?.totalCost != null) return { value: noCost.totalCost, isEstimated: true };
+    if (noCost?.monthlyEMI != null) return { value: Math.round(noCost.monthlyEMI * noCost.tenureMonths), isEstimated: true };
+    const withTotal = offer.options.find((o) => o.totalCost != null);
+    if (withTotal?.totalCost != null) return { value: withTotal.totalCost, isEstimated: true };
+    const withMonthly = offer.options.find((o) => o.monthlyEMI != null);
+    if (withMonthly?.monthlyEMI != null) return { value: Math.round(withMonthly.monthlyEMI * withMonthly.tenureMonths), isEstimated: true };
+    return null;
+  };
+
   const applyOffer = (offer: EMIOfferExtraction, idx: number) => {
     const option = offer.options[idx];
     if (!option) return;
@@ -62,25 +85,7 @@ export const EMICalculatorView: React.FC = () => {
     setAdvertisedRatePercent(option.isNoCost ? 0 : (option.interestRatePercent ?? 0));
     if (option.processingFee != null) setProcessingFee(option.processingFee);
     setKnownTotalEMIAmount(option.totalCost);
-    if (offer.cashPrice != null) {
-      setCashPrice(offer.cashPrice);
-      setCashPriceIsEstimated(false);
-    } else if (option.isNoCost && option.totalCost != null) {
-      // For a No-Cost plan, the bank's own total already ≈ the real cash price
-      // (the discount fully offsets their interest) — a better estimate than
-      // reconstructing it from monthly × tenure.
-      setCashPrice(option.totalCost);
-      setCashPriceIsEstimated(true);
-    } else if (option.monthlyEMI != null) {
-      // Cash price is often just not shown on these screens — under the standard
-      // "No-Cost EMI" assumption (installments sum to the cash price with the
-      // interest hidden in the discount), monthly × tenure is a reasonable stand-in
-      // until the user confirms/edits it.
-      setCashPrice(Math.round(option.monthlyEMI * option.tenureMonths));
-      setCashPriceIsEstimated(true);
-    } else {
-      setCashPriceIsEstimated(false);
-    }
+    // Deliberately does NOT touch cashPrice — see resolveCashPrice above.
   };
 
   const handleOfferFile = async (file: File) => {
@@ -104,6 +109,11 @@ export const EMICalculatorView: React.FC = () => {
       const noCostIdx = offer.options.findIndex((o) => o.isNoCost);
       const idx = noCostIdx >= 0 ? noCostIdx : 0;
       setSelectedOptionIdx(idx);
+      const resolvedPrice = resolveCashPrice(offer);
+      if (resolvedPrice) {
+        setCashPrice(resolvedPrice.value);
+        setCashPriceIsEstimated(resolvedPrice.isEstimated);
+      }
       applyOffer(offer, idx);
       setShowCustomizer(true);
     } catch {
