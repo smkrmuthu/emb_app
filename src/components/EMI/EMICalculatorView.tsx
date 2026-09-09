@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { calculateTrueEMI, monthlyInstallmentFor } from '../../services/emiCalculator';
 import { scanEMIOfferWithLLM, scanEMIOfferTextWithLLM, EMIOfferExtraction } from '../../services/llmScanService';
 import { processPDFFile } from '../../services/pdfService';
-import { Link2, SlidersHorizontal, Camera, AlertTriangle, Calculator } from 'lucide-react';
+import { SlidersHorizontal, Camera, AlertTriangle, Calculator } from 'lucide-react';
 
 export const EMICalculatorView: React.FC = () => {
   const [productName, setProductName] = useState('iPhone 15 (128 GB)');
@@ -16,11 +16,10 @@ export const EMICalculatorView: React.FC = () => {
   // Auto-fill from an offer — Apple/Amazon/Flipkart/bank EMI popups usually list
   // several bank/tenure combinations at once, and often don't show the cash price
   // at all (only the per-month amount), so both are handled explicitly below.
-  // Link-based checking is deferred to a later update (real fetch/parse of an
-  // arbitrary retailer page is unreliable — many are JS-rendered SPAs) — the field
-  // stays visible but honestly says so rather than faking a result.
-  const [verifyMode, setVerifyMode] = useState<'upload' | 'link'>('upload');
-  const [offerUrl, setOfferUrl] = useState('');
+  // Link-based checking (paste a URL, fetch/parse it server-side) is deferred to a
+  // later update — real fetch/parse of an arbitrary retailer page is unreliable
+  // (many are JS-rendered SPAs) — so there's no non-functional toggle for it here;
+  // it can come back cleanly once actually built.
   const offerFileInputRef = useRef<HTMLInputElement>(null);
   const [isScanningOffer, setIsScanningOffer] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -138,85 +137,32 @@ export const EMICalculatorView: React.FC = () => {
         </button>
       </div>
 
-      {/* Auto-Fill From an Offer — upload/photo works now; link checking is coming later */}
+      {/* Auto-Fill From an Offer */}
       <div style={{ marginTop: '6px', background: 'var(--paper-2)', padding: '10px', borderRadius: '10px', border: '1px solid var(--line)' }}>
         <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink)', marginBottom: '8px' }}>
           Auto-Fill From an Offer
         </div>
 
-        <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
-          <button
-            onClick={() => setVerifyMode('upload')}
-            className="btn-outline"
-            style={{
-              flex: 1, justifyContent: 'center', padding: '5px', fontSize: '10px',
-              background: verifyMode === 'upload' ? 'var(--canvas)' : 'transparent',
-              color: verifyMode === 'upload' ? 'var(--paper)' : 'var(--ink)',
-              borderColor: verifyMode === 'upload' ? 'var(--canvas)' : 'var(--line)'
-            }}
-          >
-            <Camera size={12} />
-            <span>Upload / Photo</span>
-          </button>
-          <button
-            onClick={() => setVerifyMode('link')}
-            className="btn-outline"
-            style={{
-              flex: 1, justifyContent: 'center', padding: '5px', fontSize: '10px',
-              background: verifyMode === 'link' ? 'var(--canvas)' : 'transparent',
-              color: verifyMode === 'link' ? 'var(--paper)' : 'var(--ink)',
-              borderColor: verifyMode === 'link' ? 'var(--canvas)' : 'var(--line)'
-            }}
-          >
-            <Link2 size={12} />
-            <span>Paste Link</span>
-          </button>
+        <input
+          type="file"
+          ref={offerFileInputRef}
+          onChange={handleOfferFileChange}
+          onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+          accept="image/*,application/pdf"
+          style={{ display: 'none' }}
+        />
+        <button
+          className="btn-outline"
+          style={{ width: '100%', justifyContent: 'center', padding: '8px' }}
+          onClick={() => offerFileInputRef.current?.click()}
+          disabled={isScanningOffer}
+        >
+          <Camera size={13} />
+          <span>{isScanningOffer ? 'Reading EMI options…' : 'Upload a Screenshot or PDF'}</span>
+        </button>
+        <div style={{ fontSize: '9.5px', color: 'var(--muted)', marginTop: '4px', textAlign: 'center' }}>
+          Apple, Amazon, Flipkart, or your bank's EMI popup/PDF — we'll fill in the numbers below
         </div>
-
-        {verifyMode === 'upload' ? (
-          <>
-            <input
-              type="file"
-              ref={offerFileInputRef}
-              onChange={handleOfferFileChange}
-              onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
-              accept="image/*,application/pdf"
-              style={{ display: 'none' }}
-            />
-            <button
-              className="btn-outline"
-              style={{ width: '100%', justifyContent: 'center', padding: '8px' }}
-              onClick={() => offerFileInputRef.current?.click()}
-              disabled={isScanningOffer}
-            >
-              <Camera size={13} />
-              <span>{isScanningOffer ? 'Reading EMI options…' : 'Upload a Screenshot or PDF'}</span>
-            </button>
-            <div style={{ fontSize: '9.5px', color: 'var(--muted)', marginTop: '4px', textAlign: 'center' }}>
-              Apple, Amazon, Flipkart, or your bank's EMI popup/PDF — we'll fill in the numbers below
-            </div>
-          </>
-        ) : (
-          <>
-            <input
-              type="url"
-              placeholder="Paste Amazon, Flipkart, or bank EMI URL…"
-              value={offerUrl}
-              onChange={(e) => setOfferUrl(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '6px 8px',
-                fontSize: '10.5px',
-                borderRadius: '6px',
-                border: '1px solid var(--line)',
-                fontFamily: 'var(--font-mono)'
-              }}
-            />
-            <div style={{ fontSize: '9.5px', color: 'var(--warning)', marginTop: '6px', lineHeight: 1.4 }}>
-              ⚠ Reading a pasted link automatically is coming in a future update. For now, switch to "Upload / Photo" and share a screenshot or PDF of the offer instead.
-            </div>
-          </>
-        )}
 
         {scanError && (
           <div className="callout-box warning" style={{ marginTop: '8px' }}>
