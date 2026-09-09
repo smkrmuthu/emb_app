@@ -1,8 +1,9 @@
 import React, { useRef, useState } from 'react';
 import { calculateTrueEMI } from '../../services/emiCalculator';
-import { scanEMIOfferWithLLM, EMIOfferExtraction } from '../../services/llmScanService';
+import { scanEMIOfferWithLLM, scanEMIOfferTextWithLLM, EMIOfferExtraction } from '../../services/llmScanService';
+import { processPDFFile } from '../../services/pdfService';
 import { MinimumDueTrap } from './MinimumDueTrap';
-import { Link2, SlidersHorizontal, FileText, CheckCircle2, Camera, AlertTriangle } from 'lucide-react';
+import { Link2, SlidersHorizontal, FileText, Camera, AlertTriangle } from 'lucide-react';
 import { DisputeType, BillData } from '../../types/bill';
 
 interface EMICalculatorViewProps {
@@ -17,12 +18,15 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
   const [tenureMonths, setTenureMonths] = useState(6);
   const [processingFee, setProcessingFee] = useState(999);
   const [showCustomizer, setShowCustomizer] = useState(false);
-  const [offerUrl, setOfferUrl] = useState('');
-  const [verifiedViaLink, setVerifiedViaLink] = useState(false);
 
-  // EMI offer screenshot scanning — Apple/Amazon/Flipkart/bank EMI popups usually
-  // list several bank/tenure combinations at once, and often don't show the cash
-  // price at all (only the per-month amount), so both are handled explicitly below.
+  // Auto-fill from an offer — Apple/Amazon/Flipkart/bank EMI popups usually list
+  // several bank/tenure combinations at once, and often don't show the cash price
+  // at all (only the per-month amount), so both are handled explicitly below.
+  // Link-based checking is deferred to a later update (real fetch/parse of an
+  // arbitrary retailer page is unreliable — many are JS-rendered SPAs) — the field
+  // stays visible but honestly says so rather than faking a result.
+  const [verifyMode, setVerifyMode] = useState<'upload' | 'link'>('upload');
+  const [offerUrl, setOfferUrl] = useState('');
   const offerFileInputRef = useRef<HTMLInputElement>(null);
   const [isScanningOffer, setIsScanningOffer] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -37,13 +41,6 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
     tenureMonths,
     processingFee
   });
-
-  const handleVerifyLink = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!offerUrl.trim()) return;
-    setVerifiedViaLink(true);
-    setTimeout(() => setVerifiedViaLink(false), 5000);
-  };
 
   const applyOffer = (offer: EMIOfferExtraction, idx: number) => {
     const option = offer.options[idx];
@@ -71,15 +68,17 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
     setIsScanningOffer(true);
     setScanError(null);
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error('Could not read that file'));
-        reader.readAsDataURL(file);
-      });
-      const offer = await scanEMIOfferWithLLM(dataUrl);
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      const offer = isPdf
+        ? await scanEMIOfferTextWithLLM((await processPDFFile(file)).text)
+        : await scanEMIOfferWithLLM(await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error('Could not read that file'));
+            reader.readAsDataURL(file);
+          }));
       if (!offer.options.length) {
-        setScanError("Couldn't find any EMI options in that screenshot — try a clearer photo, or adjust the details manually below.");
+        setScanError(`Couldn't find any EMI options in that ${isPdf ? 'PDF' : 'screenshot'} — try a clearer ${isPdf ? 'file' : 'photo'}, or adjust the details manually below.`);
         return;
       }
       setScannedOffer(offer);
@@ -90,8 +89,8 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
       setShowCustomizer(true);
     } catch {
       // Never surface a raw technical error (e.g. a bare "Failed to fetch") — a
-      // network/scan hiccup should read the same as a genuinely unclear screenshot.
-      setScanError("Couldn't read that screenshot — try a clearer photo, or adjust the details manually below.");
+      // network/scan hiccup should read the same as a genuinely unclear upload.
+      setScanError("Couldn't read that file — try a clearer photo or PDF, or adjust the details manually below.");
     } finally {
       setIsScanningOffer(false);
     }
@@ -120,33 +119,91 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
         </button>
       </div>
 
-      {/* Scan an EMI Offer Screenshot */}
-      <div style={{ marginTop: '6px' }}>
-        <input
-          type="file"
-          ref={offerFileInputRef}
-          onChange={handleOfferFileChange}
-          onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
-          accept="image/*"
-          style={{ display: 'none' }}
-        />
-        <button
-          className="btn-outline"
-          style={{ width: '100%', justifyContent: 'center', padding: '8px' }}
-          onClick={() => offerFileInputRef.current?.click()}
-          disabled={isScanningOffer}
-        >
-          <Camera size={13} />
-          <span>{isScanningOffer ? 'Reading EMI options…' : 'Scan an EMI Offer Screenshot'}</span>
-        </button>
-        <div style={{ fontSize: '9.5px', color: 'var(--muted)', marginTop: '4px', textAlign: 'center' }}>
-          Apple, Amazon, Flipkart, or your bank's EMI popup — we'll fill in the numbers below
+      {/* Auto-Fill From an Offer — upload/photo works now; link checking is coming later */}
+      <div style={{ marginTop: '6px', background: 'var(--paper-2)', padding: '10px', borderRadius: '10px', border: '1px solid var(--line)' }}>
+        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink)', marginBottom: '8px' }}>
+          Auto-Fill From an Offer
         </div>
+
+        <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+          <button
+            onClick={() => setVerifyMode('upload')}
+            className="btn-outline"
+            style={{
+              flex: 1, justifyContent: 'center', padding: '5px', fontSize: '10px',
+              background: verifyMode === 'upload' ? 'var(--canvas)' : 'transparent',
+              color: verifyMode === 'upload' ? 'var(--paper)' : 'var(--ink)',
+              borderColor: verifyMode === 'upload' ? 'var(--canvas)' : 'var(--line)'
+            }}
+          >
+            <Camera size={12} />
+            <span>Upload / Photo</span>
+          </button>
+          <button
+            onClick={() => setVerifyMode('link')}
+            className="btn-outline"
+            style={{
+              flex: 1, justifyContent: 'center', padding: '5px', fontSize: '10px',
+              background: verifyMode === 'link' ? 'var(--canvas)' : 'transparent',
+              color: verifyMode === 'link' ? 'var(--paper)' : 'var(--ink)',
+              borderColor: verifyMode === 'link' ? 'var(--canvas)' : 'var(--line)'
+            }}
+          >
+            <Link2 size={12} />
+            <span>Paste Link</span>
+          </button>
+        </div>
+
+        {verifyMode === 'upload' ? (
+          <>
+            <input
+              type="file"
+              ref={offerFileInputRef}
+              onChange={handleOfferFileChange}
+              onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+              accept="image/*,application/pdf"
+              style={{ display: 'none' }}
+            />
+            <button
+              className="btn-outline"
+              style={{ width: '100%', justifyContent: 'center', padding: '8px' }}
+              onClick={() => offerFileInputRef.current?.click()}
+              disabled={isScanningOffer}
+            >
+              <Camera size={13} />
+              <span>{isScanningOffer ? 'Reading EMI options…' : 'Upload a Screenshot or PDF'}</span>
+            </button>
+            <div style={{ fontSize: '9.5px', color: 'var(--muted)', marginTop: '4px', textAlign: 'center' }}>
+              Apple, Amazon, Flipkart, or your bank's EMI popup/PDF — we'll fill in the numbers below
+            </div>
+          </>
+        ) : (
+          <>
+            <input
+              type="url"
+              placeholder="Paste Amazon, Flipkart, or bank EMI URL…"
+              value={offerUrl}
+              onChange={(e) => setOfferUrl(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                fontSize: '10.5px',
+                borderRadius: '6px',
+                border: '1px solid var(--line)',
+                fontFamily: 'var(--font-mono)'
+              }}
+            />
+            <div style={{ fontSize: '9.5px', color: 'var(--warning)', marginTop: '6px', lineHeight: 1.4 }}>
+              ⚠ Reading a pasted link automatically is coming in a future update. For now, switch to "Upload / Photo" and share a screenshot or PDF of the offer instead.
+            </div>
+          </>
+        )}
+
         {scanError && (
           <div className="callout-box warning" style={{ marginTop: '8px' }}>
             <div className="callout-head">
               <AlertTriangle size={13} />
-              <span>Couldn't Read That Screenshot</span>
+              <span>Couldn't Read That</span>
             </div>
             <div className="callout-body">{scanError}</div>
           </div>
@@ -285,40 +342,6 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
             ₹{result.totalCustomerPaid.toLocaleString('en-IN')}
           </span>
         </div>
-      </div>
-
-      {/* Cross-Verification URL Box */}
-      <div style={{ background: 'var(--paper-2)', padding: '12px', borderRadius: '10px', marginTop: '14px', border: '1px solid var(--line)' }}>
-        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Link2 size={13} />
-          <span>Cross-Verify Bank / E-Commerce Offer Link</span>
-        </div>
-        <form onSubmit={handleVerifyLink} style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
-          <input
-            type="url"
-            placeholder="Paste Amazon, Flipkart, or HDFC EMI URL…"
-            value={offerUrl}
-            onChange={(e) => setOfferUrl(e.target.value)}
-            style={{
-              flex: 1,
-              padding: '6px 8px',
-              fontSize: '10.5px',
-              borderRadius: '6px',
-              border: '1px solid var(--line)',
-              fontFamily: 'var(--font-mono)'
-            }}
-          />
-          <button type="submit" className="btn-primary" style={{ width: 'auto', padding: '6px 10px', fontSize: '10.5px' }}>
-            Verify
-          </button>
-        </form>
-
-        {verifiedViaLink && (
-          <div style={{ fontSize: '10px', color: 'var(--good)', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <CheckCircle2 size={12} />
-            <span>Audited against HDFC / Retailer Key Fact Statement: Hidden GST verified!</span>
-          </div>
-        )}
       </div>
 
       {/* Minimum Due Compounding Trap */}

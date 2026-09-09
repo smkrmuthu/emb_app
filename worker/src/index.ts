@@ -127,9 +127,13 @@ const IMAGE_SCHEMAS = {
   emi_offer: EMIOfferSchema
 } as const;
 
-// Bill types read from extracted PDF text — no photo involved at all
+// Bill types read from extracted PDF text — no photo involved at all. emi_offer
+// appears in BOTH maps: it's the one type that can arrive either way (a photo of
+// a popup, or a PDF like a bank's Key Fact Statement) — see isTextType below for
+// how the actual request decides which mode runs.
 const TEXT_SCHEMAS = {
-  credit_card: CreditCardSchema
+  credit_card: CreditCardSchema,
+  emi_offer: EMIOfferSchema
 } as const;
 
 const SCHEMAS = { ...IMAGE_SCHEMAS, ...TEXT_SCHEMAS } as const;
@@ -201,7 +205,13 @@ Rules:
 - creditLimit is the total credit limit (not "Available Credit Limit" — the full sanctioned limit).
 - aprPercent is the actual stated "Annual Percentage Rate (APR)" or interest rate percentage if the statement prints one (e.g. 28.00 for "28.00%") — this is often stated explicitly; only use null if genuinely not mentioned anywhere in the text, never guess a typical/generic rate.
 - statementPeriod is the billing cycle dates (e.g. "18/Jul/2026 - 17/Aug/2026"). statementDate is when the statement was generated, if separately stated. paymentDueDate is the due date for payment.
-- If a field genuinely isn't present in the text, use null rather than guessing.`
+- If a field genuinely isn't present in the text, use null rather than guessing.`,
+
+  emi_offer: `Below is text extracted from a PDF describing EMI/installment options for a product — e.g. a bank's Key Fact Statement, or a retailer's EMI terms document. Extract the fields in the given schema, same meaning as reading this content off a screen:
+- productName is the item being financed, if stated. retailer is the site/brand/bank this document is from, if identifiable.
+- cashPrice is the product's full one-time price if explicitly stated somewhere in the text — leave null rather than computing it from EMI amounts yourself.
+- options is one entry per distinct bank+tenure combination mentioned: bankName, tenureMonths, monthlyEMI (per-month amount if stated), interestRatePercent (the stated annual rate, or 0 only if explicitly "No Cost"/"Zero Interest"/"0%" — otherwise null), processingFee (if stated for that plan), and isNoCost (true only if that specific plan is explicitly labelled "No Cost EMI"/"Zero Interest"/"0% EMI" — never inferred from the numbers).
+- Read every number exactly as it appears in the text — never estimate or invent a value that isn't there. If a field genuinely isn't present, use null rather than guessing.`
 };
 
 function corsHeaders(origin: string): Record<string, string> {
@@ -248,7 +258,14 @@ export default {
       return json({ error: `Unsupported billType "${billType}" — this endpoint currently handles: ${Object.keys(SCHEMAS).join(', ')}` }, 400, origin);
     }
 
-    const isTextType = billType in TEXT_SCHEMAS;
+    // emi_offer is the one type registered in both maps (a photo of a popup, or a
+    // PDF's extracted text both work) — for it, what the client actually sent
+    // decides the mode. Every other type is pinned to whichever single map it's
+    // in, unchanged from before.
+    const isDualModeType = billType in TEXT_SCHEMAS && billType in IMAGE_SCHEMAS;
+    const isTextType = isDualModeType
+      ? Boolean(pdfText && pdfText.trim().length >= 50)
+      : billType in TEXT_SCHEMAS;
 
     let content: Anthropic.Messages.ContentBlockParam[];
     if (isTextType) {

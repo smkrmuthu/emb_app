@@ -145,3 +145,10 @@ export async function scanEMIOfferWithLLM(imageDataUrl: string): Promise<EMIOffe
   const { base64, mediaType } = dataUrlToBase64(imageDataUrl);
   return withRetriesRaw<EMIOfferExtraction>({ imageBase64: base64, mediaType, billType: 'emi_offer' });
 }
+
+/** For a PDF upload (e.g. a bank's Key Fact Statement) instead of a screenshot —
+ *  same extraction, text-based (see worker/src/index.ts, emi_offer is registered
+ *  for both modes). */
+export async function scanEMIOfferTextWithLLM(pdfText: string): Promise<EMIOfferExtraction> {
+  return withRetriesRaw<EMIOfferExtraction>({ pdfText, billType: 'emi_offer' });
+}
