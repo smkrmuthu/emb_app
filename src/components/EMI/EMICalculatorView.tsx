@@ -2,15 +2,9 @@ import React, { useRef, useState } from 'react';
 import { calculateTrueEMI, monthlyInstallmentFor } from '../../services/emiCalculator';
 import { scanEMIOfferWithLLM, scanEMIOfferTextWithLLM, EMIOfferExtraction } from '../../services/llmScanService';
 import { processPDFFile } from '../../services/pdfService';
-import { Link2, SlidersHorizontal, FileText, Camera, AlertTriangle, Calculator } from 'lucide-react';
-import { DisputeType, BillData } from '../../types/bill';
+import { Link2, SlidersHorizontal, Camera, AlertTriangle, Calculator } from 'lucide-react';
 
-interface EMICalculatorViewProps {
-  onOpenDispute: (type: DisputeType, bill: BillData) => void;
-  activeBill?: BillData;
-}
-
-export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDispute, activeBill }) => {
+export const EMICalculatorView: React.FC = () => {
   const [productName, setProductName] = useState('iPhone 15 (128 GB)');
   const [bankName, setBankName] = useState('HDFC Bank');
   const [cashPrice, setCashPrice] = useState(54900);
@@ -456,16 +450,6 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
         </div>
       </div>
 
-      {/* Dispute Mis-selling CTA */}
-      <div style={{ marginTop: 'auto', paddingTop: '16px' }}>
-        <button
-          className="btn-primary"
-          onClick={() => onOpenDispute('emi_misleading', activeBill || ({} as any))}
-        >
-          <FileText size={13} />
-          <span>Draft RBI Misleading EMI Dispute Letter</span>
-        </button>
-      </div>
     </div>
   );
 };

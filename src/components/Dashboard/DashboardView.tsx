@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { BillData, DisputeType } from '../../types/bill';
 import { SAMPLE_BILLS } from '../../data/sampleBills';
+import { buildWhatsAppShareText } from '../../services/shareText';
 import { BillUploader } from '../Home/BillUploader';
 import { EBVisualizer } from '../Breakdown/EBVisualizer';
 import { MinimumDueTrap } from '../EMI/MinimumDueTrap';
@@ -12,7 +13,6 @@ interface DashboardViewProps {
   onUploadBill: (fileName: string, sampleId?: string) => void;
   onOpenDispute: (type: DisputeType, bill: BillData) => void;
   onOpenEMI: () => void;
-  onOpenShare: (bill: BillData) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -20,9 +20,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSelectBill,
   onUploadBill,
   onOpenDispute,
-  onOpenEMI,
-  onOpenShare
+  onOpenEMI
 }) => {
+  const [isCopied, setIsCopied] = useState(false);
+  const handleShare = () => {
+    navigator.clipboard.writeText(buildWhatsAppShareText(activeBill));
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2500);
+  };
   const getCategoryIcon = (type: BillData['type']) => {
     switch (type) {
       case 'electricity': return <Zap size={14} style={{ color: '#D97706' }} />;
@@ -223,9 +228,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span>Open "No-Cost EMI" True APR Debunker</span>
               </button>
             )}
-            <button className="btn-outline" onClick={() => onOpenShare(activeBill)}>
-              <Share2 size={14} />
-              <span>Forward Formatted Summary to Family</span>
+            <button className="btn-outline" onClick={handleShare}>
+              {isCopied ? <CheckCircle2 size={14} style={{ color: 'var(--good)' }} /> : <Share2 size={14} />}
+              <span>{isCopied ? 'Copied — Paste into WhatsApp' : 'Forward Formatted Summary to Family'}</span>
             </button>
           </div>
         </div>

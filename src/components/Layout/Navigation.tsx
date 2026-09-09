@@ -1,7 +1,7 @@
 import React from 'react';
-import { Home, ReceiptText, Percent, BellRing } from 'lucide-react';
+import { Home, ReceiptText, Percent } from 'lucide-react';
 
-export type AppTab = 'home' | 'breakdown' | 'emi' | 'phase2';
+export type AppTab = 'home' | 'breakdown' | 'emi';
 
 interface NavigationProps {
   currentTab: AppTab;
@@ -17,8 +17,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   const tabs = [
     { id: 'home', label: 'Home', icon: Home },
     { id: 'breakdown', label: 'Breakdown', icon: ReceiptText, disabled: !hasActiveBill },
-    { id: 'emi', label: 'EMI Flag', icon: Percent },
-    { id: 'phase2', label: 'Reminders', icon: BellRing }
+    { id: 'emi', label: 'EMI Flag', icon: Percent }
   ] as const;
 
   return (

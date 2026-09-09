@@ -17,7 +17,6 @@ import { BillTypePicker } from './components/Home/BillTypePicker';
 import { ScanningView } from './components/Scanner/ScanningView';
 import { BillBreakdownView } from './components/Breakdown/BillBreakdownView';
 import { EMICalculatorView } from './components/EMI/EMICalculatorView';
-import { Phase2View } from './components/Phase2/Phase2View';
 import { SpecFlowView } from './components/SpecShowcase/SpecFlowView';
 import { DashboardView } from './components/Dashboard/DashboardView';
 import { DisputeModal } from './components/Dispute/DisputeModal';
@@ -226,7 +225,6 @@ export const App: React.FC = () => {
   }, []);
 
   const handleOpenEMI   = useCallback(() => setCurrentTab('emi'), []);
-  const handleOpenShare = useCallback((_bill: BillData) => setCurrentTab('phase2'), []);
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -258,7 +256,6 @@ export const App: React.FC = () => {
             onUploadBill={(fileName, sampleId) => handleUploadBill(fileName, undefined, sampleId)}
             onOpenDispute={handleOpenDispute}
             onOpenEMI={handleOpenEMI}
-            onOpenShare={handleOpenShare}
           />
         )}
 
@@ -284,19 +281,12 @@ export const App: React.FC = () => {
                     bill={activeBill}
                     onOpenDispute={handleOpenDispute}
                     onOpenEMI={handleOpenEMI}
-                    onOpenShare={handleOpenShare}
                     onRetakePhoto={triggerRetakePhoto}
                     onChangeBillType={handleChangeBillType}
                     onUpdateBill={setActiveBill}
                   />
                 )}
-                {currentTab === 'emi' && (
-                  <EMICalculatorView
-                    onOpenDispute={handleOpenDispute}
-                    activeBill={activeBill}
-                  />
-                )}
-                {currentTab === 'phase2' && <Phase2View activeBill={activeBill} />}
+                {currentTab === 'emi' && <EMICalculatorView />}
               </>
             )}
 

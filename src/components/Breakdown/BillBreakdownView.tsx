@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { BillData, BillFlag, DisputeType } from '../../types/bill';
+import { buildWhatsAppShareText } from '../../services/shareText';
 import { EBVisualizer } from './EBVisualizer';
 import { CreditCardPayoffWidget } from './CreditCardPayoffWidget';
 import { EditBillModal } from './EditBillModal';
@@ -9,7 +10,6 @@ interface BillBreakdownViewProps {
   bill: BillData;
   onOpenDispute: (type: DisputeType, bill: BillData) => void;
   onOpenEMI: () => void;
-  onOpenShare: (bill: BillData) => void;
   onRetakePhoto?: () => void;
   onChangeBillType?: () => void;
   onUpdateBill?: (bill: BillData) => void;
@@ -19,13 +19,19 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
   bill,
   onOpenDispute,
   onOpenEMI,
-  onOpenShare,
   onRetakePhoto,
   onChangeBillType,
   onUpdateBill
 }) => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+
+  const handleShare = () => {
+    navigator.clipboard.writeText(buildWhatsAppShareText(bill));
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2500);
+  };
 
   const isLowQuality = bill.flags.some(f => f.id === 'ocr-low-quality') || (bill.totalAmount === 0 && bill.lineItems.length <= 1);
 
@@ -256,9 +262,9 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
           </button>
         )}
 
-        <button className="btn-outline" onClick={() => onOpenShare(bill)}>
-          <Share2 size={13} />
-          <span>Forward Plain Summary to Family</span>
+        <button className="btn-outline" onClick={handleShare}>
+          {isCopied ? <CheckCircle2 size={13} style={{ color: 'var(--good)' }} /> : <Share2 size={13} />}
+          <span>{isCopied ? 'Copied — Paste into WhatsApp' : 'Forward Plain Summary to Family'}</span>
         </button>
       </div>
 
