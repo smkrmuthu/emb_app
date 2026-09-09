@@ -17,6 +17,7 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
   const [cashPrice, setCashPrice] = useState(54900);
   const [tenureMonths, setTenureMonths] = useState(6);
   const [processingFee, setProcessingFee] = useState(999);
+  const [advertisedRatePercent, setAdvertisedRatePercent] = useState(0); // 0 = "No Cost EMI"
   const [showCustomizer, setShowCustomizer] = useState(false);
 
   // Auto-fill from an offer — Apple/Amazon/Flipkart/bank EMI popups usually list
@@ -39,7 +40,8 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
     bankName,
     cashPrice,
     tenureMonths,
-    processingFee
+    processingFee,
+    advertisedRate: advertisedRatePercent
   });
 
   const applyOffer = (offer: EMIOfferExtraction, idx: number) => {
@@ -48,6 +50,9 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
     if (offer.productName) setProductName(offer.productName);
     setBankName(option.bankName);
     setTenureMonths(option.tenureMonths);
+    // isNoCost is the reliable signal (explicitly labelled on the offer) — a stray
+    // interestRatePercent shouldn't override it either way.
+    setAdvertisedRatePercent(option.isNoCost ? 0 : (option.interestRatePercent ?? 0));
     if (option.processingFee != null) setProcessingFee(option.processingFee);
     if (offer.cashPrice != null) {
       setCashPrice(offer.cashPrice);
@@ -107,7 +112,7 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
       <div className="app-title-bar" style={{ marginBottom: '4px' }}>
         <div>
           <div className="app-title" style={{ fontSize: '16px' }}>{bankName} · EMI Decode</div>
-          <div className="app-subtitle">{productName} · {tenureMonths} months · "No Cost EMI"</div>
+          <div className="app-subtitle">{productName} · {tenureMonths} months · {advertisedRatePercent === 0 ? '"No Cost EMI"' : `${advertisedRatePercent}% p.a.`}</div>
         </div>
         <button
           className="btn-outline"
@@ -210,31 +215,55 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
         )}
       </div>
 
-      {/* Multiple options found — let the user pick which one to analyze */}
+      {/* Multiple options found — compare all of them, not just the selected one.
+          True APR is tenure-normalized (annualized), so it's the fair number to
+          compare across different-length plans; total paid will naturally differ
+          by tenure and isn't meant to be compared directly across rows. */}
       {scannedOffer && scannedOffer.options.length > 1 && (
         <div style={{ background: 'var(--paper-2)', padding: '8px', borderRadius: '8px', margin: '8px 0', border: '1px solid var(--line)' }}>
-          <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--ink)', marginBottom: '6px' }}>
-            Found {scannedOffer.options.length} options — pick one to decode:
+          <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--ink)', marginBottom: '2px' }}>
+            Compare All {scannedOffer.options.length} Options
+          </div>
+          <div style={{ fontSize: '9px', color: 'var(--muted)', marginBottom: '6px', lineHeight: 1.35 }}>
+            True APR is the fair comparison across different tenures — total paid will differ by plan length, that's expected.
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {scannedOffer.options.map((opt, idx) => (
-              <button
-                key={idx}
-                onClick={() => { setSelectedOptionIdx(idx); applyOffer(scannedOffer, idx); }}
-                className="btn-outline"
-                style={{
-                  justifyContent: 'space-between',
-                  padding: '6px 8px',
-                  fontSize: '10px',
-                  background: idx === selectedOptionIdx ? 'var(--canvas)' : 'transparent',
-                  color: idx === selectedOptionIdx ? 'var(--paper)' : 'var(--ink)',
-                  borderColor: idx === selectedOptionIdx ? 'var(--canvas)' : 'var(--line)'
-                }}
-              >
-                <span>{opt.bankName} · {opt.tenureMonths}mo{opt.isNoCost ? ' · No Cost' : ''}</span>
-                <span style={{ fontFamily: 'var(--font-mono)' }}>{opt.monthlyEMI ? `₹${opt.monthlyEMI.toLocaleString('en-IN')}/mo` : '—'}</span>
-              </button>
-            ))}
+            {scannedOffer.options.map((opt, idx) => {
+              const rowResult = calculateTrueEMI({
+                cashPrice,
+                tenureMonths: opt.tenureMonths,
+                processingFee: opt.processingFee ?? processingFee,
+                advertisedRate: opt.isNoCost ? 0 : (opt.interestRatePercent ?? 0)
+              });
+              const isSelected = idx === selectedOptionIdx;
+              return (
+                <button
+                  key={idx}
+                  onClick={() => { setSelectedOptionIdx(idx); applyOffer(scannedOffer, idx); }}
+                  className="btn-outline"
+                  style={{
+                    flexDirection: 'column',
+                    alignItems: 'stretch',
+                    padding: '8px',
+                    fontSize: '10px',
+                    background: isSelected ? 'var(--canvas)' : 'transparent',
+                    color: isSelected ? 'var(--paper)' : 'var(--ink)',
+                    borderColor: isSelected ? 'var(--canvas)' : 'var(--line)'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                    <span style={{ fontWeight: 600 }}>{opt.bankName} · {opt.tenureMonths}mo{opt.isNoCost ? ' · No Cost' : ''}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: isSelected ? 'var(--paper)' : 'var(--stamp)' }}>
+                      {rowResult.trueAPR}% APR
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginTop: '3px', fontSize: '9px', opacity: 0.85 }}>
+                    <span>{opt.monthlyEMI ? `₹${opt.monthlyEMI.toLocaleString('en-IN')}/mo` : '—'}</span>
+                    <span>Total: ₹{rowResult.totalCustomerPaid.toLocaleString('en-IN')}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -293,6 +322,16 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
               />
             </div>
             <div>
+              <label style={{ color: 'var(--muted)', display: 'block' }}>Advertised Rate (% p.a.)</label>
+              <input
+                type="number"
+                value={advertisedRatePercent}
+                onChange={(e) => setAdvertisedRatePercent(Number(e.target.value))}
+                placeholder="0 = No Cost EMI"
+                style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid var(--line)', fontFamily: 'var(--font-mono)' }}
+              />
+            </div>
+            <div>
               <label style={{ color: 'var(--muted)', display: 'block' }}>Bank Name</label>
               <input
                 type="text"
@@ -308,7 +347,7 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
       {/* Screen 4 Hero Spec Section */}
       <div style={{ marginTop: '10px' }}>
         <div className="font-mono" style={{ fontSize: '11.5px', color: 'var(--muted)', textDecoration: 'line-through' }}>
-          Advertised: 0% interest
+          Advertised: {advertisedRatePercent === 0 ? '0% interest' : `${advertisedRatePercent}% p.a.`}
         </div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: '28px', fontWeight: 700, color: 'var(--stamp)', marginTop: '2px' }}>
           {result.trueAPR}% APR
@@ -328,13 +367,9 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
           <span>EMI monthly installment</span>
           <span className="val">₹{result.monthlyInstallment.toLocaleString('en-IN')} × {result.tenureMonths}m</span>
         </div>
-        <div className="breakdown-row" style={{ borderBottom: '1px dotted var(--line)', padding: '6px 0' }}>
+        <div className="breakdown-row" style={{ padding: '6px 0' }}>
           <span>Bank processing fee</span>
           <span className="val">₹{result.processingFee} + ₹{result.processingFeeGST} GST</span>
-        </div>
-        <div className="breakdown-row" style={{ padding: '6px 0' }}>
-          <span>18% GST on interest component</span>
-          <span className="val" style={{ color: 'var(--stamp)' }}>₹{result.totalGSTOnInterest}</span>
         </div>
         <div className="breakdown-row" style={{ borderTop: '1.5px solid var(--ink)', paddingTop: '6px', fontWeight: 600 }}>
           <span>Total you actually pay</span>
