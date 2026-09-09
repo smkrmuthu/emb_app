@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { calculateTrueEMI, monthlyInstallmentFor } from '../../services/emiCalculator';
 import { scanEMIOfferWithLLM, scanEMIOfferTextWithLLM, EMIOfferExtraction } from '../../services/llmScanService';
 import { processPDFFile } from '../../services/pdfService';
-import { SlidersHorizontal, Camera, FileUp, AlertTriangle, Calculator } from 'lucide-react';
+import { SlidersHorizontal, Camera, FileUp, AlertTriangle, Calculator, Loader2 } from 'lucide-react';
 
 export const EMICalculatorView: React.FC = () => {
   const [productName, setProductName] = useState('iPhone 15 (128 GB)');
@@ -178,7 +178,7 @@ export const EMICalculatorView: React.FC = () => {
             onClick={() => offerCameraInputRef.current?.click()}
             disabled={isScanningOffer}
           >
-            <Camera size={13} />
+            {isScanningOffer ? <Loader2 size={13} className="animate-spin" /> : <Camera size={13} />}
             <span>Take Photo</span>
           </button>
           <button
@@ -187,12 +187,13 @@ export const EMICalculatorView: React.FC = () => {
             onClick={() => offerFileInputRef.current?.click()}
             disabled={isScanningOffer}
           >
-            <FileUp size={13} />
+            {isScanningOffer ? <Loader2 size={13} className="animate-spin" /> : <FileUp size={13} />}
             <span>Upload File</span>
           </button>
         </div>
-        <div style={{ fontSize: '9.5px', color: 'var(--muted)', marginTop: '4px', textAlign: 'center' }}>
-          {isScanningOffer ? 'Reading EMI options…' : "Apple, Amazon, Flipkart, or your bank's EMI popup/PDF — we'll fill in the numbers below"}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', fontSize: '9.5px', color: 'var(--muted)', marginTop: '4px', textAlign: 'center' }}>
+          {isScanningOffer && <Loader2 size={11} className="animate-spin" style={{ color: 'var(--gold)' }} />}
+          <span>{isScanningOffer ? 'Reading EMI options…' : "Apple, Amazon, Flipkart, or your bank's EMI popup/PDF — we'll fill in the numbers below"}</span>
         </div>
 
         {scanError && (
