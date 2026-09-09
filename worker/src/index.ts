@@ -98,11 +98,33 @@ const CreditCardSchema = z.object({
   aprPercent: z.number().nullable()
 });
 
+// A screenshot of an EMI options popup/checkout screen (Apple India, Amazon,
+// Flipkart, a bank's own site) — not a bill at all, so it isn't part of the app's
+// BillType union; it's scanned purely to pre-fill the "No-Cost EMI" true-APR
+// calculator instead of the user typing every number in by hand. These screens
+// usually list several bank/tenure combinations, so this returns all of them
+// rather than picking just one.
+const EMIOfferOptionSchema = z.object({
+  bankName: z.string(),
+  tenureMonths: z.number(),
+  monthlyEMI: z.number().nullable(),
+  interestRatePercent: z.number().nullable(),
+  processingFee: z.number().nullable(),
+  isNoCost: z.boolean()
+});
+const EMIOfferSchema = z.object({
+  productName: z.string().nullable(),
+  retailer: z.string().nullable(),
+  cashPrice: z.number().nullable(),
+  options: z.array(EMIOfferOptionSchema)
+});
+
 // Bill types read directly from a photo (vision)
 const IMAGE_SCHEMAS = {
   restaurant: RestaurantSchema,
   grocery: GrocerySchema,
-  electricity: ElectricitySchema
+  electricity: ElectricitySchema,
+  emi_offer: EMIOfferSchema
 } as const;
 
 // Bill types read from extracted PDF text — no photo involved at all
@@ -150,7 +172,22 @@ Rules:
 - otherChargesAndArrears is the SUM of every other small line item seen on Telangana-style bills that isn't covered by the fields above — Customer Charges, Interest on ED, Surcharge, ACD Surcharge, FSA/FCA Charges, Interest on SD, Loss/Gain (which can itself be a tiny negative or positive number), and any Arrears/ACD Due — add them all together into this one number (subtracting where a line is itself negative, e.g. a small negative Loss/Gain). Leave null if none of these lines are printed at all or they all read 0.
 - grandTotal is the final amount actually due — prefer a "Total Due" figure over "Bill Amount"/"Net Payable" if both are printed and differ (Total Due already includes arrears).
 - serviceConnectionNumber and consumerName come from the consumer details section. consumerName is a person's name only (e.g. "DINESH.R") — never include the address, plot/door number, or street name that follows it.
-- If a field genuinely isn't printed on the bill or isn't legible, use null rather than guessing.`
+- If a field genuinely isn't printed on the bill or isn't legible, use null rather than guessing.`,
+
+  emi_offer: `Read this photo/screenshot of an EMI options screen — a bank's site, an e-commerce checkout page (Amazon, Flipkart), or a retailer's own EMI popup (e.g. Apple India) — and extract the fields in the given schema. These screens usually list MULTIPLE bank/tenure combinations at once (a table or a stacked list of rows) — extract every one you can see, not just one.
+Rules:
+- Read every number exactly as shown — never estimate, round, or invent a value you can't actually see.
+- productName is the item being financed, if shown (e.g. "iPhone 15 128GB"). retailer is the site/brand this screen belongs to (e.g. "Apple India", "Amazon", "Flipkart", "HDFC Bank"), if identifiable from logos/branding/URL visible in the screenshot.
+- cashPrice is the product's full one-time price, if shown ANYWHERE on the screen (often near the top, separate from the EMI table) — this is frequently absent from EMI-only popups, so leave it null rather than guessing; do not compute it from the EMI amounts yourself.
+- options is one entry per distinct bank+tenure row/card actually shown:
+  - bankName exactly as printed (e.g. "HDFC Bank", "ICICI Bank", "Bajaj Finserv").
+  - tenureMonths is the number of months for that specific row (e.g. 6, 9, 12, 24).
+  - monthlyEMI is the per-month amount shown for that row, if printed.
+  - interestRatePercent is the stated annual rate for that row if shown (e.g. 13 for "13% p.a."); use 0 only if the row is explicitly labelled "No Cost"/"Zero Interest"/"0%" — otherwise null if no rate is printed at all.
+  - processingFee is that row's processing fee if shown; null if not printed (fees are often only shown in fine print elsewhere, not per-row).
+  - isNoCost is true only if that specific row is explicitly labelled "No Cost EMI"/"Zero Interest"/"0% EMI" — never infer this from the numbers yourself.
+- If the screen shows only one plan (not a table), return a single-item options array.
+- If a field genuinely isn't shown or isn't legible, use null rather than guessing.`
 };
 
 const TEXT_PROMPTS: Record<TextBillType, string> = {

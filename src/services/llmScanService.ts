@@ -42,7 +42,7 @@ function dataUrlToBase64(dataUrl: string): { base64: string; mediaType: string }
 
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
-async function callScanEndpoint(body: Record<string, unknown>): Promise<LLMBillExtraction> {
+async function callScanEndpoint<T = LLMBillExtraction>(body: Record<string, unknown>): Promise<T> {
   const resp = await fetch(LLM_SCAN_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -54,7 +54,7 @@ async function callScanEndpoint(body: Record<string, unknown>): Promise<LLMBillE
     throw new Error(errBody?.error || `LLM scan request failed (HTTP ${resp.status})`);
   }
 
-  return await resp.json() as LLMBillExtraction;
+  return await resp.json() as T;
 }
 
 // Observed in practice: the model occasionally returns a transient "request not
@@ -104,4 +104,44 @@ export async function scanBillTextWithLLM(pdfText: string, billType: BillType, p
     }
   }
   return withRetries(body, billType);
+}
+
+// ─── EMI offer screenshot scanning ──────────────────────────────────────────────
+// Not a bill at all (no BillType, no BillData) — this just pre-fills the "No-Cost
+// EMI" true-APR calculator from a photo of an EMI options screen (Apple India,
+// Amazon/Flipkart checkout, a bank's own site), which usually list several
+// bank/tenure combinations at once rather than a single value.
+
+export interface EMIOfferOption {
+  bankName: string;
+  tenureMonths: number;
+  monthlyEMI: number | null;
+  interestRatePercent: number | null;
+  processingFee: number | null;
+  isNoCost: boolean;
+}
+
+export interface EMIOfferExtraction {
+  productName: string | null;
+  retailer: string | null;
+  cashPrice: number | null;
+  options: EMIOfferOption[];
+}
+
+async function withRetriesRaw<T>(body: Record<string, unknown>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await callScanEndpoint<T>(body);
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_ATTEMPTS) await delay(600 * attempt);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('EMI offer scan failed after retries');
+}
+
+export async function scanEMIOfferWithLLM(imageDataUrl: string): Promise<EMIOfferExtraction> {
+  const { base64, mediaType } = dataUrlToBase64(imageDataUrl);
+  return withRetriesRaw<EMIOfferExtraction>({ imageBase64: base64, mediaType, billType: 'emi_offer' });
 }

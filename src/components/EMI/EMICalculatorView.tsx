@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { calculateTrueEMI } from '../../services/emiCalculator';
+import { scanEMIOfferWithLLM, EMIOfferExtraction } from '../../services/llmScanService';
 import { MinimumDueTrap } from './MinimumDueTrap';
-import { Link2, SlidersHorizontal, FileText, CheckCircle2 } from 'lucide-react';
+import { Link2, SlidersHorizontal, FileText, CheckCircle2, Camera, AlertTriangle } from 'lucide-react';
 import { DisputeType, BillData } from '../../types/bill';
 
 interface EMICalculatorViewProps {
@@ -19,6 +20,16 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
   const [offerUrl, setOfferUrl] = useState('');
   const [verifiedViaLink, setVerifiedViaLink] = useState(false);
 
+  // EMI offer screenshot scanning — Apple/Amazon/Flipkart/bank EMI popups usually
+  // list several bank/tenure combinations at once, and often don't show the cash
+  // price at all (only the per-month amount), so both are handled explicitly below.
+  const offerFileInputRef = useRef<HTMLInputElement>(null);
+  const [isScanningOffer, setIsScanningOffer] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scannedOffer, setScannedOffer] = useState<EMIOfferExtraction | null>(null);
+  const [selectedOptionIdx, setSelectedOptionIdx] = useState(0);
+  const [cashPriceIsEstimated, setCashPriceIsEstimated] = useState(false);
+
   const result = calculateTrueEMI({
     productName,
     bankName,
@@ -32,6 +43,63 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
     if (!offerUrl.trim()) return;
     setVerifiedViaLink(true);
     setTimeout(() => setVerifiedViaLink(false), 5000);
+  };
+
+  const applyOffer = (offer: EMIOfferExtraction, idx: number) => {
+    const option = offer.options[idx];
+    if (!option) return;
+    if (offer.productName) setProductName(offer.productName);
+    setBankName(option.bankName);
+    setTenureMonths(option.tenureMonths);
+    if (option.processingFee != null) setProcessingFee(option.processingFee);
+    if (offer.cashPrice != null) {
+      setCashPrice(offer.cashPrice);
+      setCashPriceIsEstimated(false);
+    } else if (option.monthlyEMI != null) {
+      // Cash price is often just not shown on these screens — under the standard
+      // "No-Cost EMI" assumption (installments sum to the cash price with the
+      // interest hidden in the discount), monthly × tenure is a reasonable stand-in
+      // until the user confirms/edits it.
+      setCashPrice(Math.round(option.monthlyEMI * option.tenureMonths));
+      setCashPriceIsEstimated(true);
+    } else {
+      setCashPriceIsEstimated(false);
+    }
+  };
+
+  const handleOfferFile = async (file: File) => {
+    setIsScanningOffer(true);
+    setScanError(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('Could not read that file'));
+        reader.readAsDataURL(file);
+      });
+      const offer = await scanEMIOfferWithLLM(dataUrl);
+      if (!offer.options.length) {
+        setScanError("Couldn't find any EMI options in that screenshot — try a clearer photo, or adjust the details manually below.");
+        return;
+      }
+      setScannedOffer(offer);
+      const noCostIdx = offer.options.findIndex((o) => o.isNoCost);
+      const idx = noCostIdx >= 0 ? noCostIdx : 0;
+      setSelectedOptionIdx(idx);
+      applyOffer(offer, idx);
+      setShowCustomizer(true);
+    } catch {
+      // Never surface a raw technical error (e.g. a bare "Failed to fetch") — a
+      // network/scan hiccup should read the same as a genuinely unclear screenshot.
+      setScanError("Couldn't read that screenshot — try a clearer photo, or adjust the details manually below.");
+    } finally {
+      setIsScanningOffer(false);
+    }
+  };
+
+  const handleOfferFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleOfferFile(file);
   };
 
   return (
@@ -51,6 +119,68 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
           <span>{showCustomizer ? 'Close' : 'Adjust'}</span>
         </button>
       </div>
+
+      {/* Scan an EMI Offer Screenshot */}
+      <div style={{ marginTop: '6px' }}>
+        <input
+          type="file"
+          ref={offerFileInputRef}
+          onChange={handleOfferFileChange}
+          onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+          accept="image/*"
+          style={{ display: 'none' }}
+        />
+        <button
+          className="btn-outline"
+          style={{ width: '100%', justifyContent: 'center', padding: '8px' }}
+          onClick={() => offerFileInputRef.current?.click()}
+          disabled={isScanningOffer}
+        >
+          <Camera size={13} />
+          <span>{isScanningOffer ? 'Reading EMI options…' : 'Scan an EMI Offer Screenshot'}</span>
+        </button>
+        <div style={{ fontSize: '9.5px', color: 'var(--muted)', marginTop: '4px', textAlign: 'center' }}>
+          Apple, Amazon, Flipkart, or your bank's EMI popup — we'll fill in the numbers below
+        </div>
+        {scanError && (
+          <div className="callout-box warning" style={{ marginTop: '8px' }}>
+            <div className="callout-head">
+              <AlertTriangle size={13} />
+              <span>Couldn't Read That Screenshot</span>
+            </div>
+            <div className="callout-body">{scanError}</div>
+          </div>
+        )}
+      </div>
+
+      {/* Multiple options found — let the user pick which one to analyze */}
+      {scannedOffer && scannedOffer.options.length > 1 && (
+        <div style={{ background: 'var(--paper-2)', padding: '8px', borderRadius: '8px', margin: '8px 0', border: '1px solid var(--line)' }}>
+          <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--ink)', marginBottom: '6px' }}>
+            Found {scannedOffer.options.length} options — pick one to decode:
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {scannedOffer.options.map((opt, idx) => (
+              <button
+                key={idx}
+                onClick={() => { setSelectedOptionIdx(idx); applyOffer(scannedOffer, idx); }}
+                className="btn-outline"
+                style={{
+                  justifyContent: 'space-between',
+                  padding: '6px 8px',
+                  fontSize: '10px',
+                  background: idx === selectedOptionIdx ? 'var(--canvas)' : 'transparent',
+                  color: idx === selectedOptionIdx ? 'var(--paper)' : 'var(--ink)',
+                  borderColor: idx === selectedOptionIdx ? 'var(--canvas)' : 'var(--line)'
+                }}
+              >
+                <span>{opt.bankName} · {opt.tenureMonths}mo{opt.isNoCost ? ' · No Cost' : ''}</span>
+                <span style={{ fontFamily: 'var(--font-mono)' }}>{opt.monthlyEMI ? `₹${opt.monthlyEMI.toLocaleString('en-IN')}/mo` : '—'}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Adjust Inputs */}
       {showCustomizer && (
@@ -73,9 +203,14 @@ export const EMICalculatorView: React.FC<EMICalculatorViewProps> = ({ onOpenDisp
               <input
                 type="number"
                 value={cashPrice}
-                onChange={(e) => setCashPrice(Number(e.target.value))}
+                onChange={(e) => { setCashPrice(Number(e.target.value)); setCashPriceIsEstimated(false); }}
                 style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid var(--line)', fontFamily: 'var(--font-mono)' }}
               />
+              {cashPriceIsEstimated && (
+                <div style={{ fontSize: '9px', color: 'var(--warning)', marginTop: '2px', lineHeight: 1.3 }}>
+                  ⚠ Not shown on screenshot — estimated as monthly × tenure. Edit if you know the exact price.
+                </div>
+              )}
             </div>
             <div>
               <label style={{ color: 'var(--muted)', display: 'block' }}>Tenure (Months)</label>
