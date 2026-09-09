@@ -70,16 +70,17 @@ const ElectricitySchema = z.object({
   // to know whether the domestic slab-savings model even applies.
   category: z.string().nullable(),
   contractedLoadKW: z.number().nullable(),
-  phase: z.union([z.literal(1), z.literal(3)]).nullable(),
-  // Telangana-style flat charges — read as printed, never independently recomputed.
-  customerCharges: z.number().nullable(),
-  interestOnED: z.number().nullable(),
-  surcharge: z.number().nullable(),
-  acdSurcharge: z.number().nullable(),
-  fsaFcaCharges: z.number().nullable(),
-  interestOnSD: z.number().nullable(),
-  lossGain: z.number().nullable(),
-  arrears: z.number().nullable(),
+  // Plain nullable number rather than a literal-union (1 | 3): a union-of-literals
+  // schema shape triggered a hard 403 from Anthropic's structured-output validation —
+  // normalize/validate the value to 1 or 3 on the client instead.
+  phase: z.number().nullable(),
+  // Anthropic's structured outputs cap a schema at 16 nullable/union-typed fields
+  // (a real request with more errors out) — Telangana-style bills print several small
+  // extra charges (Customer Charges, Surcharge, ACD Surcharge, FSA/FCA Charges,
+  // Interest on ED/SD, Loss/Gain) plus Arrears, which would blow that budget as
+  // separate fields. Summed into one line instead — the total still reconciles
+  // correctly against grandTotal even though the sub-breakdown isn't itemized.
+  otherChargesAndArrears: z.number().nullable(),
   dueDate: z.string().nullable(),
   billPeriod: z.string().nullable(),
   grandTotal: z.number()
@@ -146,8 +147,7 @@ Rules:
 - energyCharges is the base energy charge amount (often has an HSN/SAC code like "2716 0000" printed right next to it — that code is NOT the amount; read the actual rupee figure, which is usually printed with two decimals).
 - govtSubsidy is the subsidy amount subtracted (printed as a negative or under "Less:"), as a positive number.
 - adjustments is any deduction explicitly labelled "Adjustments" (not the same as customerCharges/surcharge/etc below), as a positive number.
-- customerCharges, interestOnED ("Interest on ED"), surcharge, acdSurcharge ("ACD Surcharge"), fsaFcaCharges ("FSA/FCA Charges"), interestOnSD ("Interest on SD"), and lossGain ("Loss/Gain", can be a tiny negative or positive number) are separate line items seen on Telangana-style bills — read each one exactly as printed if present; leave null if the bill doesn't have that line at all (don't default to 0).
-- arrears is any "Arrears as on..."/"Arrears after..."/"ACD Due" amount — sum them if there are several; leave null if all such lines read 0 or aren't printed.
+- otherChargesAndArrears is the SUM of every other small line item seen on Telangana-style bills that isn't covered by the fields above — Customer Charges, Interest on ED, Surcharge, ACD Surcharge, FSA/FCA Charges, Interest on SD, Loss/Gain (which can itself be a tiny negative or positive number), and any Arrears/ACD Due — add them all together into this one number (subtracting where a line is itself negative, e.g. a small negative Loss/Gain). Leave null if none of these lines are printed at all or they all read 0.
 - grandTotal is the final amount actually due — prefer a "Total Due" figure over "Bill Amount"/"Net Payable" if both are printed and differ (Total Due already includes arrears).
 - serviceConnectionNumber and consumerName come from the consumer details section. consumerName is a person's name only (e.g. "DINESH.R") — never include the address, plot/door number, or street name that follows it.
 - If a field genuinely isn't printed on the bill or isn't legible, use null rather than guessing.`

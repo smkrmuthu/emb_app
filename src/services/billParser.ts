@@ -549,7 +549,10 @@ export interface ElectricityParsed {
   contractedLoadKW?: number;
   phase?: 1 | 3;
   /** Extra flat charges seen on Telangana-style bills — read and shown as-is, never
-   *  independently recomputed (no official simple formula for these ancillary items). */
+   *  independently recomputed (no official simple formula for these ancillary items).
+   *  Populated individually by the regex/OCR fallback path (no field-count limit there);
+   *  the LLM path instead populates the single consolidated otherChargesAndArrears below
+   *  (Anthropic's structured outputs cap a schema at 16 nullable fields). */
   customerCharges?: number;
   interestOnED?: number;
   surcharge?: number;
@@ -558,6 +561,7 @@ export interface ElectricityParsed {
   interestOnSD?: number;
   lossGain?: number;
   arrears?: number;
+  otherChargesAndArrears?: number;
 }
 
 /** Maps a detected discom name to the state whose tariff rules apply. Falls back to
@@ -683,7 +687,8 @@ function isNonDomestic(category?: string): boolean {
  *  so this renders identically to before for bills that don't have them (e.g. TN). */
 function buildElectricityLineItems(p: ElectricityParsed): LineItem[] {
   const { energyCharges, govtSubsidy, adjustments, roundOff, consumedUnits, total,
-    customerCharges, interestOnED, surcharge, acdSurcharge, fsaFcaCharges, interestOnSD, lossGain, arrears } = p;
+    customerCharges, interestOnED, surcharge, acdSurcharge, fsaFcaCharges, interestOnSD, lossGain, arrears,
+    otherChargesAndArrears } = p;
   let idx = 0;
   const next = () => String(++idx);
   const items: LineItem[] = [];
@@ -699,6 +704,9 @@ function buildElectricityLineItems(p: ElectricityParsed): LineItem[] {
   if (interestOnSD) items.push({ id: next(), label: 'Interest on Security Deposit', amount: interestOnSD, isSubItem: true });
   if (adjustments > 0) items.push({ id: next(), label: 'Prior Adjustments / SD', amount: -adjustments });
   if (lossGain) items.push({ id: next(), label: 'Loss/Gain', amount: lossGain, isSubItem: true });
+  // LLM-sourced scans report these consolidated into one figure instead of the
+  // granular fields above (see ElectricityParsed) — shown as a single line.
+  if (otherChargesAndArrears) items.push({ id: next(), label: 'Other Charges & Arrears', amount: otherChargesAndArrears, isSubItem: true });
   if (roundOff !== 0) items.push({ id: next(), label: 'Round off', amount: roundOff, isSubItem: true });
   if (arrears) items.push({ id: next(), label: 'Arrears', amount: arrears });
   items.push({ id: 'total', label: 'Net Amount Payable', amount: total });
@@ -1125,15 +1133,13 @@ export interface LLMBillExtraction {
    *  slab-savings model applies at all. */
   category?: string;
   contractedLoadKW?: number;
-  phase?: 1 | 3;
-  customerCharges?: number;
-  interestOnED?: number;
-  surcharge?: number;
-  acdSurcharge?: number;
-  fsaFcaCharges?: number;
-  interestOnSD?: number;
-  lossGain?: number;
-  arrears?: number;
+  /** Raw value from the worker (a plain number — see worker/src/index.ts for why this
+   *  isn't typed as a 1|3 literal union) — normalized to 1|3 in buildBillFromLLMExtraction. */
+  phase?: number;
+  /** Sum of Customer Charges/Surcharge/ACD Surcharge/FSA-FCA/Interest on ED&SD/Loss-Gain/
+   *  Arrears — consolidated into one field because Anthropic's structured outputs cap a
+   *  schema at 16 nullable fields (see worker/src/index.ts). */
+  otherChargesAndArrears?: number;
 
   // Credit Card (text-based extraction, not vision)
   bankName?: string;
@@ -1247,15 +1253,9 @@ export function buildBillFromLLMExtraction(data: LLMBillExtraction, billType: Bi
         meterNumber: data.meterNumber,
         category: data.category,
         contractedLoadKW: data.contractedLoadKW,
-        phase: data.phase,
-        customerCharges: data.customerCharges,
-        interestOnED: data.interestOnED,
-        surcharge: data.surcharge,
-        acdSurcharge: data.acdSurcharge,
-        fsaFcaCharges: data.fsaFcaCharges,
-        interestOnSD: data.interestOnSD,
-        lossGain: data.lossGain,
-        arrears: data.arrears
+        // Worker sends a plain number (see worker/src/index.ts) — normalize to 1|3 here.
+        phase: data.phase === 3 ? 3 : data.phase === 1 ? 1 : undefined,
+        otherChargesAndArrears: data.otherChargesAndArrears
       });
     }
     case 'credit_card': {
