@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { Camera, FileUp, Plus } from 'lucide-react';
+import { Camera, FileUp } from 'lucide-react';
 import { processPDFFile } from '../../services/pdfService';
+import { captureNativePhoto } from '../../services/nativeCapture';
 
 interface BillUploaderProps {
   onFileSelected: (fileName: string, fileUrl?: string, pdfText?: string, billId?: string) => void;
@@ -10,6 +11,7 @@ export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) =>
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const readAndEmit = async (file: File) => {
     if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
@@ -54,7 +56,19 @@ export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) =>
     if (e.target.files?.[0]) readAndEmit(e.target.files[0]);
   };
 
-  const triggerFileInput = () => {
+  const triggerCamera = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isProcessing) return;
+    const native = await captureNativePhoto();
+    if (native) {
+      onFileSelected(native.fileName, native.dataUrl);
+      return;
+    }
+    cameraInputRef.current?.click();
+  };
+
+  const triggerFileInput = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (!isProcessing) fileInputRef.current?.click();
   };
 
@@ -64,13 +78,19 @@ export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) =>
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={triggerFileInput}
-      role="button"
-      tabIndex={0}
-      aria-label="Upload bill photo or PDF"
-      onKeyDown={(e) => e.key === 'Enter' && triggerFileInput()}
       style={isProcessing ? { cursor: 'wait', opacity: 0.75 } : undefined}
     >
+      {/* Native camera capture (mobile app) falls back to this file input's own
+          camera capture on web — see captureNativePhoto(). */}
+      <input
+        type="file"
+        ref={cameraInputRef}
+        onChange={handleInputChange}
+        onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+        accept="image/*"
+        capture="environment"
+        style={{ display: 'none' }}
+      />
       <input
         type="file"
         ref={fileInputRef}
@@ -79,21 +99,33 @@ export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) =>
         accept="image/*,application/pdf"
         style={{ display: 'none' }}
       />
-      <div className="glyph">
-        {isProcessing ? <span className="font-mono" style={{ fontSize: '11px' }}>…</span> : <Plus size={20} strokeWidth={2.5} />}
-      </div>
+
       <div className="primary">{isProcessing ? 'Reading PDF…' : 'Scan a bill'}</div>
       <div className="secondary">
-        {isProcessing ? 'Extracting text from every page — this can take a few seconds' : isDragging ? 'Drop it to scan!' : 'Upload photo or PDF · drag & drop'}
+        {isProcessing ? 'Extracting text from every page — this can take a few seconds' : isDragging ? 'Drop it to scan!' : 'Take a photo, or upload a photo/PDF'}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', marginTop: '10px' }}>
-        <span style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <Camera size={12} /> Photo
-        </span>
-        <span style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <FileUp size={12} /> PDF / Image
-        </span>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '14px' }}>
+        <button
+          type="button"
+          className="btn-outline"
+          onClick={triggerCamera}
+          disabled={isProcessing}
+          style={{ flex: 1, maxWidth: '160px', justifyContent: 'center', padding: '8px' }}
+        >
+          <Camera size={13} />
+          <span>Take Photo</span>
+        </button>
+        <button
+          type="button"
+          className="btn-outline"
+          onClick={triggerFileInput}
+          disabled={isProcessing}
+          style={{ flex: 1, maxWidth: '160px', justifyContent: 'center', padding: '8px' }}
+        >
+          <FileUp size={13} />
+          <span>Upload File</span>
+        </button>
       </div>
     </div>
   );

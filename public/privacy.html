@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — Explain My Bill</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📜</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --paper: #F2E8DC;
+      --paper-2: #F6EFE5;
+      --ink: #2B211B;
+      --ink-soft: #4A3B2E;
+      --muted: #8A7A63;
+      --line: #DCC9AE;
+      --stamp: #C1613D;
+      --gold: #B5652F;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink-soft);
+      font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.6;
+    }
+    .wrap { max-width: 680px; margin: 0 auto; padding: 48px 24px 80px; }
+    h1 {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 30px;
+      color: var(--ink);
+      margin: 0 0 6px;
+    }
+    .updated { font-size: 12.5px; color: var(--muted); margin-bottom: 32px; }
+    h2 {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--ink);
+      margin: 34px 0 8px;
+    }
+    p, li { font-size: 14.5px; }
+    ul { padding-left: 20px; }
+    a { color: var(--stamp); }
+    .callout {
+      background: var(--paper-2);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--gold);
+      border-radius: 6px;
+      padding: 14px 16px;
+      margin: 20px 0;
+      font-size: 14px;
+    }
+    footer {
+      margin-top: 48px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Privacy Policy</h1>
+    <div class="updated">Last updated: September 2026 · Explain My Bill (Phase 1)</div>
+
+    <p>
+      Explain My Bill reads a photo or PDF of your bill and explains it in plain language, checking it
+      against Indian GST and consumer-protection rules. This page explains what happens to what you
+      upload.
+    </p>
+
+    <div class="callout">
+      In short: your bill photo/PDF is sent to be read, is not stored on our servers afterward, and no
+      account or personal profile is created. It is shared with one third party — Anthropic — solely to
+      read the bill's contents.
+    </div>
+
+    <h2>What we collect</h2>
+    <p>When you scan a bill, the photo or PDF you provide is sent to our backend (a Cloudflare Worker)
+      and forwarded to Anthropic's Claude API to be read into structured data (biller name, amounts,
+      line items, dates). We do not require or collect your name, email, phone number, or any account
+      information — there are no user accounts in this version of the app.</p>
+
+    <h2>What we don't do</h2>
+    <ul>
+      <li>We do not store your bill photos or PDFs on our servers after they've been read.</li>
+      <li>We do not sell or share your data with advertisers.</li>
+      <li>We do not track you across other apps or websites.</li>
+      <li>We do not require sign-in or a user account.</li>
+    </ul>
+
+    <h2>Third-party processing</h2>
+    <p>Bill content is sent to <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener">Anthropic</a>,
+      whose API reads the bill and returns structured data. Anthropic processes this data under its own
+      privacy policy and API terms. No other third party receives your bill content.</p>
+
+    <h2>Data retention</h2>
+    <p>Scan results (the decoded bill shown in the app) live only in the app's local session — they are
+      not saved to any server-side database, and are cleared when you reload or close the app. Nothing
+      persists between visits yet.</p>
+
+    <h2>Your bill's sensitive details</h2>
+    <p>Please avoid uploading bills that contain full unmasked financial account numbers or government
+      ID numbers where avoidable. Credit card statements are read for the amounts and dates needed to
+      explain EMI/interest charges; masked card numbers (e.g. "XXXX 5323") may be read as printed but
+      are not used for anything beyond display within your own decoded result.</p>
+
+    <h2>Children's privacy</h2>
+    <p>This app is not directed at children and is not knowingly used to collect data from children.</p>
+
+    <h2>Changes to this policy</h2>
+    <p>If this policy changes — for example, when accounts or persistent storage are introduced in a
+      later phase — this page will be updated and the "last updated" date above will change.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about this policy or your data can be sent to the developer via the contact details
+      listed on the app's store page.</p>
+
+    <footer>Explain My Bill — Phase 1</footer>
+  </div>
+</body>
+</html>

@@ -9,6 +9,7 @@ import {
   getBestMatchingSample
 } from './services/ocrService';
 import { processPDFFile } from './services/pdfService';
+import { captureNativePhoto } from './services/nativeCapture';
 import { Header, AppViewMode } from './components/Layout/Header';
 import { Navigation, AppTab } from './components/Layout/Navigation';
 import { ViewportFrame } from './components/Layout/ViewportFrame';
@@ -182,9 +183,14 @@ export const App: React.FC = () => {
 
   // ── Re-take photo / Upload Trigger ───────────────────────────────────────
 
-  const triggerRetakePhoto = useCallback(() => {
+  const triggerRetakePhoto = useCallback(async () => {
+    const native = await captureNativePhoto();
+    if (native) {
+      handleUploadBill(native.fileName, native.dataUrl);
+      return;
+    }
     globalFileInputRef.current?.click();
-  }, []);
+  }, [handleUploadBill]);
 
   const handleChangeBillType = useCallback(() => {
     setPendingUpload({

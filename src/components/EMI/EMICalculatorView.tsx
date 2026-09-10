@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { calculateTrueEMI, monthlyInstallmentFor } from '../../services/emiCalculator';
 import { scanEMIOfferWithLLM, scanEMIOfferTextWithLLM, EMIOfferExtraction } from '../../services/llmScanService';
 import { processPDFFile } from '../../services/pdfService';
+import { captureNativePhoto } from '../../services/nativeCapture';
 import { SlidersHorizontal, Camera, FileUp, AlertTriangle, Calculator, Loader2 } from 'lucide-react';
 
 // Typical bank EMI processing fee — used both as the initial manual-mode
@@ -98,21 +99,13 @@ export const EMICalculatorView: React.FC = () => {
     // Deliberately does NOT touch cashPrice — see resolveCashPrice above.
   };
 
-  const handleOfferFile = async (file: File) => {
+  const applyScannedOffer = async (scan: Promise<EMIOfferExtraction>, kind: 'PDF' | 'photo') => {
     setIsScanningOffer(true);
     setScanError(null);
     try {
-      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-      const offer = isPdf
-        ? await scanEMIOfferTextWithLLM((await processPDFFile(file)).text)
-        : await scanEMIOfferWithLLM(await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = () => reject(new Error('Could not read that file'));
-            reader.readAsDataURL(file);
-          }));
+      const offer = await scan;
       if (!offer.options.length) {
-        setScanError(`Couldn't find any EMI options in that ${isPdf ? 'PDF' : 'screenshot'} — try a clearer ${isPdf ? 'file' : 'photo'}, or adjust the details manually below.`);
+        setScanError(`Couldn't find any EMI options in that ${kind === 'PDF' ? 'PDF' : 'screenshot'} — try a clearer ${kind === 'PDF' ? 'file' : 'photo'}, or adjust the details manually below.`);
         return;
       }
       setScannedOffer(offer);
@@ -133,6 +126,23 @@ export const EMICalculatorView: React.FC = () => {
     } finally {
       setIsScanningOffer(false);
     }
+  };
+
+  const handleOfferFile = async (file: File) => {
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    const scan = isPdf
+      ? processPDFFile(file).then((r) => scanEMIOfferTextWithLLM(r.text))
+      : new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('Could not read that file'));
+          reader.readAsDataURL(file);
+        }).then((dataUrl) => scanEMIOfferWithLLM(dataUrl));
+    await applyScannedOffer(scan, isPdf ? 'PDF' : 'photo');
+  };
+
+  const handleOfferNativePhoto = async (dataUrl: string) => {
+    await applyScannedOffer(scanEMIOfferWithLLM(dataUrl), 'photo');
   };
 
   const handleOfferFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -185,7 +195,11 @@ export const EMICalculatorView: React.FC = () => {
           <button
             className="btn-outline"
             style={{ flex: 1, justifyContent: 'center', padding: '8px' }}
-            onClick={() => offerCameraInputRef.current?.click()}
+            onClick={async () => {
+              const native = await captureNativePhoto();
+              if (native) { handleOfferNativePhoto(native.dataUrl); return; }
+              offerCameraInputRef.current?.click();
+            }}
             disabled={isScanningOffer}
           >
             {isScanningOffer ? <Loader2 size={13} className="animate-spin" /> : <Camera size={13} />}

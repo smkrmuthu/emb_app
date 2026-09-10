@@ -3,10 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 
 # Comma-separated list of origins allowed to call this endpoint — the frontend
-# is deployed both to GitHub Pages and to a Cloudflare Workers static-assets
-# site. Add a new origin here (comma-separated) if you deploy it anywhere else.
+# is deployed to GitHub Pages, a Cloudflare Workers static-assets site, and
+# (via Capacitor) the iOS and Android apps, which serve their bundled web
+# content from these two fixed origins regardless of device. Add a new origin
+# here (comma-separated) if you deploy it anywhere else.
 [vars]
-ALLOWED_ORIGIN = "https://smkrmuthu.github.io,https://explain-my-bill.smkrmuthu.workers.dev"
+ALLOWED_ORIGIN = "https://smkrmuthu.github.io,https://explain-my-bill.smkrmuthu.workers.dev,capacitor://localhost,https://localhost"
 
 # ANTHROPIC_API_KEY is NOT set here — it's a secret, set once via:
 #   npx wrangler secret put ANTHROPIC_API_KEY
