@@ -33,7 +33,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 WORKER_URL = "https://emb-bill-scanner.smkrmuthu.workers.dev"
 ORIGIN = "https://smkrmuthu.github.io"  # must match worker's ALLOWED_ORIGIN
@@ -210,6 +210,61 @@ def _expect_matches_true(r: dict) -> list:
     return []
 
 
+# ─── Fixture: degraded veg-restaurant bill — item names must never come out
+# as non-veg dishes. (Found live: a real, slightly-blurry "A2B — VEG.
+# RESTAURANT" bill's "POORI [2 NOS]" and "SAMBAR VADAI [1 PC]" were
+# hallucinated as "PORK EZ MOZI" and "SHRIMP CHIKN ELPL" — confidently wrong,
+# unrelated, and non-vegetarian on a bill explicitly headed "Veg". The
+# blur/downscale below is a synthetic stand-in for a real photographed
+# thermal receipt's degradation, not a byte-for-byte reproduction of that
+# bill — the check only asserts the specific failure mode is gone, not that
+# every character is read perfectly off a genuinely hard image.)
+
+NON_VEG_WORDS = ['pork', 'chicken', 'chikn', 'mutton', 'beef', 'fish', 'shrimp', 'prawn', 'egg', 'meat']
+
+
+def _veg_restaurant_blurry_request() -> dict:
+    img = Image.new('RGB', (500, 350), 'white')
+    draw = ImageDraw.Draw(img)
+    lines = [
+        "A2B ADYAR ANANDA BHAVAN SWEETS",
+        "VEG. RESTAURANT",
+        "TAX INVOICE",
+        "",
+        "PLAIN DOSAI       1   70.00   70.00",
+        "POORI [2 NOS]     1   75.00   75.00",
+        "SAMBAR VADAI [1 PC] 1 55.00   55.00",
+        "TEA               1   35.00   35.00",
+        "",
+        "SubTotal              235.00",
+        "SGST 2.5%                5.88",
+        "CGST 2.5%                5.88",
+        "Total(Rs)               247.00",
+    ]
+    y = 10
+    for line in lines:
+        draw.text((10, y), line, fill='black')
+        y += 24
+    img = img.filter(ImageFilter.GaussianBlur(radius=1.2))
+    img = img.resize((250, 175)).resize((500, 350))
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return {"imageBase64": b64, "mediaType": "image/png", "billType": "restaurant"}
+
+
+def _veg_restaurant_blurry_check(r: dict) -> list:
+    errs = []
+    if r.get("matchesCategory") is not True:
+        errs.append(f"expected matchesCategory=True, got {r.get('matchesCategory')}")
+    for item in (r.get("items") or []):
+        label = (item.get("label") or "").lower()
+        hit = next((w for w in NON_VEG_WORDS if w in label), None)
+        if hit:
+            errs.append(f"item label {item.get('label')!r} looks non-veg (matched {hit!r}) on a Veg-labelled bill")
+    return errs
+
+
 # ─── Fixture: plain grocery receipt, correctly categorized (happy path) ────
 
 def _grocery_request() -> dict:
@@ -312,6 +367,8 @@ CASES = [
          _kerala_request, _kerala_check),
     Case("grocery_correct", "Plain grocery receipt, correctly categorized",
          _grocery_request, _grocery_check),
+    Case("veg_restaurant_no_nonveg_hallucination", "Degraded veg-restaurant bill must not hallucinate non-veg item names",
+         _veg_restaurant_blurry_request, _veg_restaurant_blurry_check),
     Case("credit_card_correct", "Credit card statement text, correctly categorized",
          _credit_card_request, _credit_card_check),
     Case("emi_offer_multi_option", "EMI offer screen with 3 bank/tenure options",
