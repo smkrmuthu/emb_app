@@ -207,11 +207,23 @@ export const EMICalculatorView: React.FC = () => {
         )}
       </div>
 
+      {/* While a scan is running, hide the previous result instead of leaving it
+          on screen underneath a spinning button — the comparison table and true-
+          cost decode below are specifically "the last scan's answer," and letting
+          stale numbers sit there while a new file is being read invites reading
+          them as if they already reflect the new upload. */}
+      {isScanningOffer && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '32px 16px', color: 'var(--muted)' }}>
+          <Loader2 size={22} className="animate-spin" style={{ color: 'var(--gold)' }} />
+          <span style={{ fontSize: '11px' }}>Reading your offer…</span>
+        </div>
+      )}
+
       {/* Multiple options found — compare all of them, not just the selected one.
           True APR is tenure-normalized (annualized), so it's the fair number to
           compare across different-length plans; total paid will naturally differ
           by tenure and isn't meant to be compared directly across rows. */}
-      {scannedOffer && scannedOffer.options.length > 1 && (
+      {!isScanningOffer && scannedOffer && scannedOffer.options.length > 1 && (
         <div style={{ background: 'var(--paper-2)', padding: '8px', borderRadius: '8px', margin: '8px 0', border: '1px solid var(--line)' }}>
           <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--ink)', marginBottom: '2px' }}>
             Compare All {scannedOffer.options.length} Options
@@ -337,6 +349,8 @@ export const EMICalculatorView: React.FC = () => {
         </div>
       )}
 
+      {!isScanningOffer && (
+        <>
       {/* Screen 4 Hero Spec Section */}
       <div style={{ marginTop: '10px' }}>
         <div className="font-mono" style={{ fontSize: '11.5px', color: 'var(--muted)', textDecoration: 'line-through' }}>
@@ -371,6 +385,8 @@ export const EMICalculatorView: React.FC = () => {
           </span>
         </div>
       </div>
+        </>
+      )}
 
       {/* Quick EMI Estimate — plain textbook math, separate from the true-cost
           decoder above (no fee/discount adjustments). For shopping/planning
