@@ -279,20 +279,27 @@ export const BillBreakdownView: React.FC<BillBreakdownViewProps> = ({
         ))}
       </div>
 
-      {/* Action Buttons */}
-      <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {bill.type === 'credit_card' && (
-          <button className="btn-gold" onClick={onOpenEMI}>
-            <Percent size={13} />
-            <span>Verify "No-Cost EMI" True APR</span>
-          </button>
-        )}
+      {/* Action Buttons — only once there's an actual bill behind them. On an
+          unreadable/PDF-required/wrong-category placeholder (isLowQuality or
+          isCategoryMismatch), "Verify No-Cost EMI" has nothing real to check
+          and "Forward to Family" would just share a nonsensical "₹0, PDF
+          Statement Needed" message — the callout above already gives the
+          right actions (re-take, upload PDF, pick category) for those cases. */}
+      {!isLowQuality && !isCategoryMismatch && (
+        <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {bill.type === 'credit_card' && (
+            <button className="btn-gold" onClick={onOpenEMI}>
+              <Percent size={13} />
+              <span>Verify "No-Cost EMI" True APR</span>
+            </button>
+          )}
 
-        <button className="btn-outline" onClick={handleShare}>
-          {isCopied ? <CheckCircle2 size={13} style={{ color: 'var(--good)' }} /> : <Share2 size={13} />}
-          <span>{isCopied ? 'Copied — Paste into WhatsApp' : 'Forward Plain Summary to Family'}</span>
-        </button>
-      </div>
+          <button className="btn-outline" onClick={handleShare}>
+            {isCopied ? <CheckCircle2 size={13} style={{ color: 'var(--good)' }} /> : <Share2 size={13} />}
+            <span>{isCopied ? 'Copied — Paste into WhatsApp' : 'Forward Plain Summary to Family'}</span>
+          </button>
+        </div>
+      )}
 
       {/* Edit Values Modal */}
       {isEditing && (
