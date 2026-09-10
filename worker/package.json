@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test:fixtures": "python3 fixtures/run_fixtures.py"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",

@@ -77,6 +77,16 @@ curl -X POST http://localhost:8787 \
   -d '{"imageBase64":"<base64 jpeg>","mediaType":"image/jpeg","billType":"restaurant"}'
 ```
 
+## Regression fixtures
+
+Before deploying a schema/prompt change, run the fixture suite — it catches
+regressions on bill formats and edge cases we've already fixed once (see
+[fixtures/README.md](fixtures/README.md) for details):
+
+```bash
+npm run test:fixtures
+```
+
 ## Extending to hotel / gas / credit_card
 
 Add a Zod schema + prompt for the type in `src/index.ts` (follow the pattern
