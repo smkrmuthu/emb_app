@@ -272,9 +272,22 @@ export function buildRestaurant(p: RestaurantParsed): BillData {
   const reliableSubtotal = itemsReliable ? p.subtotal : 0;
   const reliableItems    = itemsReliable ? p.items : [];
 
-  const effectiveRate = reliableSubtotal > 0
-    ? Math.round((totalGST / reliableSubtotal) * 1000) / 10  // 1 decimal
-    : 0;
+  // Prefer the printed rate LABELS ("CGST @ 2.5%") over reconciling rupee tax
+  // amounts against the subtotal — a rate is a small, legally-standardized
+  // number printed distinctly (often bold, right next to "CGST"/"SGST"), so
+  // it reads far more reliably than a precise rupee decimal. Backing the
+  // "effective rate" out of (cgst+sgst)/subtotal instead means any rounding
+  // or misread in the rupee figures directly distorts the rate — e.g. a
+  // genuinely-correct 2.5%+2.5% bill showing as "4.7%" or "7.4%" purely from
+  // paisa-level rounding, which then either looks confusingly not-quite-5%
+  // when it's fine, or — worse — falsely flags a compliant restaurant for an
+  // "illegal" GST rate it never actually charged.
+  const statedRate = p.cgstRate + p.sgstRate;
+  const effectiveRate = statedRate > 0
+    ? Math.round(statedRate * 10) / 10
+    : reliableSubtotal > 0
+      ? Math.round((totalGST / reliableSubtotal) * 1000) / 10  // 1 decimal
+      : 0;
   const totalOk = p.grandTotal === 0 || approxEq(reliableSubtotal + totalGST + p.serviceCharge, p.grandTotal, 3);
   const gstOk   = Math.abs(effectiveRate - 5) < 0.6;
 
