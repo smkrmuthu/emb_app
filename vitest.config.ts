@@ -8,6 +8,11 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
-    globals: false
+    globals: false,
+    // Runs afterEach(cleanup) for every test file — required because
+    // @testing-library/react's own auto-cleanup only self-registers when it
+    // finds a global `afterEach`, which `globals: false` deliberately doesn't
+    // expose. See vitest.setup.ts.
+    setupFiles: ['./vitest.setup.ts']
   }
 });

@@ -86,3 +86,58 @@ describe('EMICalculatorView — rescan does not leave stale results visible', ()
     await screen.findByText("Couldn't Read That");
   });
 });
+
+/**
+ * Regression test for a second staleness bug found the same session: applyOffer
+ * only called setProductName/setProcessingFee when the NEW scan actually
+ * reported those fields — so scanning a second offer that didn't print a
+ * product name (e.g. a bare bank EMI comparison table) left the FIRST offer's
+ * product name ("Reno 14 (5G)...") on screen, looking like it belonged to the
+ * second file. Same root cause as the rescan-placeholder bug (a field not
+ * being reset on new data), different fields.
+ */
+describe('EMICalculatorView — a new scan does not inherit a previous scan\'s product name/fee', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('resets productName and processingFee to defaults when the new offer does not report them', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        productName: 'Reno 14 (5G) (8 + 256 GB)',
+        retailer: null,
+        cashPrice: null,
+        options: [{ bankName: 'HDFC Bank', tenureMonths: 6, monthlyEMI: 3000, interestRatePercent: 0, processingFee: 199, isNoCost: true, totalCost: 18000 }]
+      })
+    } as Response));
+
+    const { container } = render(<EMICalculatorView />);
+    const input = getUploadInput(container);
+    fireEvent.change(input, { target: { files: [tinyPngFile('emi2.png')] } });
+
+    await screen.findByDisplayValue('Reno 14 (5G) (8 + 256 GB)');
+    screen.getByDisplayValue('199');
+
+    // Second offer (e.g. a bare Amazon Pay ICICI EMI table) — no product name,
+    // no processing fee printed anywhere on it.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        productName: null,
+        retailer: 'Amazon Pay ICICI Credit Card',
+        cashPrice: null,
+        options: [{ bankName: 'Amazon Pay ICICI Credit Card', tenureMonths: 3, monthlyEMI: 4000, interestRatePercent: 0, processingFee: null, isNoCost: true, totalCost: 11999 }]
+      })
+    } as Response));
+
+    fireEvent.change(input, { target: { files: [tinyPngFile('emi3.png')] } });
+
+    // The stale "Reno 14..." name and "199" fee must be gone — replaced by
+    // neutral defaults — not left over from the first, unrelated offer.
+    await screen.findByDisplayValue('This EMI Offer');
+    expect(screen.queryByDisplayValue('Reno 14 (5G) (8 + 256 GB)')).toBeNull();
+    screen.getByDisplayValue('999');
+    expect(screen.queryByDisplayValue('199')).toBeNull();
+  });
+});

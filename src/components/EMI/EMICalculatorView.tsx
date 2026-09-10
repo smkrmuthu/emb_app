@@ -4,12 +4,17 @@ import { scanEMIOfferWithLLM, scanEMIOfferTextWithLLM, EMIOfferExtraction } from
 import { processPDFFile } from '../../services/pdfService';
 import { SlidersHorizontal, Camera, FileUp, AlertTriangle, Calculator, Loader2 } from 'lucide-react';
 
+// Typical bank EMI processing fee — used both as the initial manual-mode
+// default and as the fallback when a scanned offer doesn't print one (see
+// applyOffer), so a missing fee never silently keeps a PREVIOUS scan's value.
+const DEFAULT_PROCESSING_FEE = 999;
+
 export const EMICalculatorView: React.FC = () => {
   const [productName, setProductName] = useState('iPhone 15 (128 GB)');
   const [bankName, setBankName] = useState('HDFC Bank');
   const [cashPrice, setCashPrice] = useState(54900);
   const [tenureMonths, setTenureMonths] = useState(6);
-  const [processingFee, setProcessingFee] = useState(999);
+  const [processingFee, setProcessingFee] = useState(DEFAULT_PROCESSING_FEE);
   const [advertisedRatePercent, setAdvertisedRatePercent] = useState(0); // 0 = "No Cost EMI"
   const [showCustomizer, setShowCustomizer] = useState(false);
 
@@ -77,13 +82,18 @@ export const EMICalculatorView: React.FC = () => {
   const applyOffer = (offer: EMIOfferExtraction, idx: number) => {
     const option = offer.options[idx];
     if (!option) return;
-    if (offer.productName) setProductName(offer.productName);
+    // Every field below is set unconditionally (with an explicit fallback when
+    // the new scan didn't report one) — conditionally skipping the update when
+    // a field is missing left the PREVIOUS scan's value on screen looking like
+    // it belonged to the new file (e.g. an earlier offer's product name still
+    // showing after scanning a second offer that had none printed on it).
+    setProductName(offer.productName || 'This EMI Offer');
     setBankName(option.bankName);
     setTenureMonths(option.tenureMonths);
     // isNoCost is the reliable signal (explicitly labelled on the offer) — a stray
     // interestRatePercent shouldn't override it either way.
     setAdvertisedRatePercent(option.isNoCost ? 0 : (option.interestRatePercent ?? 0));
-    if (option.processingFee != null) setProcessingFee(option.processingFee);
+    setProcessingFee(option.processingFee ?? DEFAULT_PROCESSING_FEE);
     setKnownTotalEMIAmount(option.totalCost);
     // Deliberately does NOT touch cashPrice — see resolveCashPrice above.
   };
