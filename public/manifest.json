@@ -2,7 +2,7 @@
   "name": "Explain My Bill",
   "short_name": "Explain My Bill",
   "description": "Plain-language decode of Indian bills, with every charge checked against real GST and consumer-protection rules.",
-  "start_url": "/",
+  "start_url": ".",
   "display": "standalone",
   "background_color": "#F2E8DC",
   "theme_color": "#C1613D",
