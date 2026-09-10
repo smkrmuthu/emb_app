@@ -245,9 +245,20 @@ function json(data: unknown, status: number, origin: string): Response {
   });
 }
 
+/** ALLOWED_ORIGIN is a comma-separated list (the frontend is deployed to both
+ *  GitHub Pages and a Cloudflare Workers static-assets site) — echo back
+ *  whichever allowed origin actually made the request rather than a single
+ *  hardcoded value, which is what proper multi-origin CORS requires (a
+ *  response can only ever declare one Access-Control-Allow-Origin). */
+function resolveOrigin(request: Request, env: Env): string {
+  const allowed = (env.ALLOWED_ORIGIN || '').split(',').map((o) => o.trim()).filter(Boolean);
+  const requestOrigin = request.headers.get('Origin') || '';
+  return allowed.includes(requestOrigin) ? requestOrigin : (allowed[0] || '*');
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const origin = env.ALLOWED_ORIGIN || '*';
+    const origin = resolveOrigin(request, env);
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders(origin) });
