@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Camera, FileUp } from 'lucide-react';
 import { processPDFFile } from '../../services/pdfService';
 import { captureNativePhoto } from '../../services/nativeCapture';
+import { normalizeImageOrientation } from '../../services/imageOrientation';
 
 interface BillUploaderProps {
   onFileSelected: (fileName: string, fileUrl?: string, pdfText?: string, billId?: string) => void;
@@ -29,13 +30,10 @@ export const BillUploader: React.FC<BillUploaderProps> = ({ onFileSelected }) =>
         setIsProcessing(false);
       }
     } else {
-      // Standard image file (JPEG, PNG, WEBP)
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        onFileSelected(file.name, dataUrl);
-      };
-      reader.readAsDataURL(file);
+      // Standard image file (JPEG, PNG, WEBP) — normalize EXIF orientation
+      // first so a sideways-stored photo doesn't get read sideways.
+      const dataUrl = await normalizeImageOrientation(file);
+      onFileSelected(file.name, dataUrl);
     }
   };
 

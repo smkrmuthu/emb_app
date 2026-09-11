@@ -10,6 +10,7 @@ import {
 } from './services/ocrService';
 import { processPDFFile } from './services/pdfService';
 import { captureNativePhoto } from './services/nativeCapture';
+import { normalizeImageOrientation } from './services/imageOrientation';
 import { Header, AppViewMode } from './components/Layout/Header';
 import { Navigation, AppTab } from './components/Layout/Navigation';
 import { ViewportFrame } from './components/Layout/ViewportFrame';
@@ -211,12 +212,8 @@ export const App: React.FC = () => {
           handleUploadBill(file.name, undefined);
         }
       } else {
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          const dataUrl = evt.target?.result as string;
-          handleUploadBill(file.name, dataUrl);
-        };
-        reader.readAsDataURL(file);
+        const dataUrl = await normalizeImageOrientation(file);
+        handleUploadBill(file.name, dataUrl);
       }
     }
   }, [handleUploadBill]);

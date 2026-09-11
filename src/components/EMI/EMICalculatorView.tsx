@@ -3,6 +3,7 @@ import { calculateTrueEMI, monthlyInstallmentFor } from '../../services/emiCalcu
 import { scanEMIOfferWithLLM, scanEMIOfferTextWithLLM, EMIOfferExtraction } from '../../services/llmScanService';
 import { processPDFFile } from '../../services/pdfService';
 import { captureNativePhoto } from '../../services/nativeCapture';
+import { normalizeImageOrientation } from '../../services/imageOrientation';
 import { SlidersHorizontal, Camera, FileUp, AlertTriangle, Calculator, Loader2 } from 'lucide-react';
 
 // Typical bank EMI processing fee — used both as the initial manual-mode
@@ -132,12 +133,7 @@ export const EMICalculatorView: React.FC = () => {
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     const scan = isPdf
       ? processPDFFile(file).then((r) => scanEMIOfferTextWithLLM(r.text))
-      : new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = () => reject(new Error('Could not read that file'));
-          reader.readAsDataURL(file);
-        }).then((dataUrl) => scanEMIOfferWithLLM(dataUrl));
+      : normalizeImageOrientation(file).then((dataUrl) => scanEMIOfferWithLLM(dataUrl));
     await applyScannedOffer(scan, isPdf ? 'PDF' : 'photo');
   };
 
